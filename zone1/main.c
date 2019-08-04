@@ -124,6 +124,7 @@ void print_cpu_info(void) {
 	const uint64_t mvendorid = ECALL_CSRR_MVENDID();
 	const char *mvendorid_str = (mvendorid==0x10e31913 ? "SiFive, Inc.\0" :
 						         mvendorid==0x489      ? "SiFive, Inc.\0" :
+								 mvendorid==0x31e      ? "Andes Technology\0" :
 								 mvendorid==0x57c      ? "Hex Five, Inc.\0" :
 												         "\0");
 	printf("Vendor        : 0x%08x %s \n", (int)mvendorid, mvendorid_str);
@@ -133,6 +134,7 @@ void print_cpu_info(void) {
 	const char *marchid_str = (mvendorid==0x489 && (int)misa==0x40101105    && marchid==0x80000002 ? "E21\0"  :
 							   mvendorid==0x489 && (int)misa==0x40101105    && marchid==0x00000001 ? "E31\0"  :
 						       mvendorid==0x489 && misa==0x8000000000101105 && marchid==0x00000001 ? "S51\0"  :
+						       mvendorid==0x31e && (int)misa==0x40901105    && marchid==0x80000022 ? "N22\0" :
 						       mvendorid==0x57c && (int)misa==0x40101105    && marchid==0x00000001 ? "X300\0" :
 						       "\0");
 	printf("Architecture  : 0x%08x %s \n", (int)marchid, marchid_str);

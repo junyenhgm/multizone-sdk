@@ -29,7 +29,11 @@ else ifeq ($(BOARD),X300)
 else ifeq ($(BOARD),E902)
 	ARCH := rv32
 	RISCV_ARCH := $(ARCH)emac
-	RISCV_ABI := ilp32e		
+	RISCV_ABI := ilp32e
+else ifeq ($(BOARD),N22)
+	ARCH := rv32
+	RISCV_ARCH := $(ARCH)imac
+	RISCV_ABI := ilp32	
 else
 	$(error Unsupported board $(BOARD))
 endif
@@ -67,15 +71,11 @@ export AR      := $(CROSS_COMPILE)ar
 .PHONY: all 
 all: clean
 	$(MAKE) -C zone1
-	$(MAKE) -C zone2
-	$(MAKE) -C zone3
-	java -jar multizone.jar -c bsp/$(BOARD)/multizone.cfg zone1/zone1.hex zone2/zone2.hex zone3/zone3.hex --arch=$(BOARD)
+	java -jar multizone.jar -c bsp/$(BOARD)/multizone.cfg zone1/zone1.hex --arch=$(BOARD)
 
 .PHONY: clean
 clean: 
 	$(MAKE) -C zone1 clean
-	$(MAKE) -C zone2 clean
-	$(MAKE) -C zone3 clean
 	rm -f multizone.hex
 
 
