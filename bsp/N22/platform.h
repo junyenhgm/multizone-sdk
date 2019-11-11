@@ -31,6 +31,30 @@
 #define UART_THR 			0x20	// Transmitter Holding Register (when DLAB = 0) (0x20)
 #define UART_RBR 			0x20	// Receiver Buffer Register (when DLAB = 0) (0x20)
 
+// -----------------------------------------------------------------------------
+// PLIC - AndesStar V5 UM166-10
+// -----------------------------------------------------------------------------
+#define PLIC_BASE 					0xE4000000
+#define PLIC_PRI_OFFSET 			0x0
+#define PLIC_PRI_SHIFT_PER_SOURCE 	0x2
+#define PLIC_IRQ_GPIO_SOURCE		0x7
+#define PLIC_EN_OFFSET				0x2000
+#define PLIC_ENE_SHIFT_PER_TARGET	0x7
+#define PLIC_CLAIM_OFFSET			0x200004
+
+// -----------------------------------------------------------------------------
+// GPIO - Andes ATCGPIO100
+// ------------------------------------------------------------------------------
+
+#define GPIO_BASE 			0xF0700000
+#define GPIO_OUTPUT_EN  	0x28	// 3.2.5. Channel Direction Register (Offset 0x28)
+#define GPIO_INPUT_VAL  	0x20	// 3.2.3. Channel Data-In Register   (Offset 0x20)
+#define GPIO_OUTPUT_VAL 	0x24	// 3.2.4. Channel Data-Out Register  (Offset 0x24)
+#define GPIO_INT_EN			0x50	// 3.2.10. Interrupt Enable Register (Offset 0x50)
+#define GPIO_INT_MODE		0x54	// 3.2.11. Interrupt Mode Register (Offset 0x54, 0x58, 0x5C, 0x60)
+#define GPIO_INT_STATUS		0x64	// 3.2.12. Interrupt Status Register (Offset 0x64)
+#define GPIO_DEBOUNCE_EN 	0x70	// 3.2.13. De-bounce Enable Register (Offset 0x70)
+#define GPIO_DEBOUNCE_CTRL 	0x74	// 3.2.14. De-bounce Control Register (Offset 0x74)
 
 // -----------------------------------------------------------------------------
 // C Helper functions
@@ -44,6 +68,6 @@
 #define GPIO_REG(offset) _REG32(GPIO_BASE, offset)
 #define PWM_REG(offset)  _REG32(PWM_BASE, offset)
 #define UART_REG(offset) _REG32(UART_BASE, offset)
-
+#define PLIC_REG(offset) _REG32(PLIC_BASE, offset)
 
 #endif /* HEXFIVE_PLATFORM_H */
