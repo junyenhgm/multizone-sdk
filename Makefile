@@ -71,7 +71,7 @@ export AR      := $(CROSS_COMPILE)ar
 .PHONY: all 
 all: clean
 	$(MAKE) -C zone1
-	java -jar multizone.jar --arch=$(BOARD) -v \
+	java -jar multizone.jar --arch=$(BOARD) \
 	   -k ../hexfive-kern/build/N22/kernel.hex \
 	   -c bsp/$(BOARD)/multizone.cfg \
 	   zone1/zone1.hex
