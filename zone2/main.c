@@ -88,9 +88,11 @@ int main (void){
 
 	while(1){
 
+		volatile int x = PLIC_REG(0x1000);
+
 		GPIO_REG(GPIO_OUTPUT_VAL) ^= (0x1 << led);
 
-		const uint64_t timeout = ECALL_CSRR_MTIME() + RTC_FREQ;
+		const uint64_t timeout = ECALL_CSRR_MTIME() + RTC_FREQ*50/100;
 								//(GPIO_REG(GPIO_OUTPUT_VAL) & (0x1 << led) ? 50 : 950) * RTC_FREQ/1000 ;
 
 		while (ECALL_CSRR_MTIME() < timeout){

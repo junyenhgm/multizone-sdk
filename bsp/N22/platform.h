@@ -9,12 +9,12 @@
 // -----------------------------------------------------------------------------
 // RTC (MTIME)
 // -----------------------------------------------------------------------------
-#define RTC_MTIME	0xE6000000
+#define RTC_BASE	0xE6000000
+#define RTC_MTIME	    0x0000
 
 // -----------------------------------------------------------------------------
 // UART - Andes ATCUART100
 // -----------------------------------------------------------------------------
-
 #define UART_BASE 	  0xF0300000
 #define UART_LCR 			0x2C	// Line Control Register (0x2C)
 #define UART_LCR_WLS		0b11	// LCR.WLS 1:0 Word length setting, 0b11 = 8-bit
@@ -44,8 +44,7 @@
 
 // -----------------------------------------------------------------------------
 // GPIO - Andes ATCGPIO100
-// ------------------------------------------------------------------------------
-
+// -----------------------------------------------------------------------------
 #define GPIO_BASE 			0xF0700000
 #define GPIO_OUTPUT_EN  	0x28	// 3.2.5. Channel Direction Register (Offset 0x28)
 #define GPIO_INPUT_VAL  	0x20	// 3.2.3. Channel Data-In Register   (Offset 0x20)
@@ -57,6 +56,13 @@
 #define GPIO_DEBOUNCE_CTRL 	0x74	// 3.2.14. De-bounce Control Register (Offset 0x74)
 
 // -----------------------------------------------------------------------------
+// SMU - Andes AE250 System Management Unit
+// -----------------------------------------------------------------------------
+#define SMU_BASE 			0xF0100000
+#define SMU_PINMUX_CTRL0	0x1000	// PIN MUX control register 0 Section 15.10.11
+#define SMU_PINMUX_CTRL1	0x1004	// PIN MUX control register 1 Section 15.10.12
+
+// -----------------------------------------------------------------------------
 // C Helper functions
 // -----------------------------------------------------------------------------
 
@@ -64,6 +70,7 @@
 #define _REG32(base, offset) (*(volatile uint32_t *)((base) + (offset)))
 #define _REG16(base, offset) (*(volatile uint16_t *)((base) + (offset)))
 
+#define SMU_REG(offset)  _REG32(SMU_BASE, offset)
 #define RTC_REG(offset)  _REG64(RTC_BASE, offset)
 #define GPIO_REG(offset) _REG32(GPIO_BASE, offset)
 #define PWM_REG(offset)  _REG32(PWM_BASE, offset)
