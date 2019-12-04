@@ -7,9 +7,9 @@
 #include <libhexfive.h>
 #include "owi_task.h"
 
-#define SPI_TDI 29 	// J5.5 IO13 out
-#define SPI_TCK 28	// J5.6 IO12 out (master)
-#define SPI_TDO 27	// J5.7 IO11 in
+#define SPI_TDO 19	// IO3 J7.5 PINMUX CTRL1[7:6] = 0
+#define SPI_TCK 20	// IO4 J7.4 PINMUX CTRL1[9:8] = 0
+#define SPI_TDI 21 	// IO5 J7.3 PINMUX CTRL1[11:10] = 0
 
 #define LED_RED		8	// LED4 (green)
 #define LED_GREEN	8	// LED4 (green)
@@ -61,16 +61,18 @@ int main (void){
 	//volatile int w=0; while(1){w++;}
 	//while(1) ECALL_YIELD();
 
-	SMU_REG(SMU_PINMUX_CTRL1) |= ((2 <<22) | (2<<24) | 2<<26);
+	// AndesCore_N22_DS154_V1.3 Table 116: Pin Assignment of GPIO Signals - Corvette-F1
+	//SMU_REG(SMU_PINMUX_CTRL1) |= ((0 <<6) | (0<<8) | 0<<10);
+
 	GPIO_REG(GPIO_OUTPUT_EN) |= ((0x1 << SPI_TCK) | (0x1<< SPI_TDO));
 
 	#define CMD_STOP  ((uint8_t[]){0x00, 0x00, 0x00})
 	#define CMD_DUMMY ((uint8_t[]){0xFF, 0xFF, 0xFF})
-	#define CMD_TIME  RTC_FREQ*25/100 // 250ms
-	#define PING_TIME RTC_FREQ // 1000ms
+	#define CMD_TIME  RTC_FREQ*25/100 	//  250ms
+	#define PING_TIME RTC_FREQ 			// 1000ms
 	#define SYS_TIME  RTC_REG(RTC_MTIME)
 	#define LED_ON_TIME  RTC_FREQ*2/100 //  50ms
-	#define LED_OFF_TIME RTC_FREQ 		  // 950ms
+	#define LED_OFF_TIME RTC_FREQ 		// 950ms
 
 
 	uint64_t cmd_timer=0, ping_timer=0, led_timer=0;
