@@ -393,11 +393,10 @@ void print_pmp(void){
 			write(1, "\e[2K", 4); // 2K clear entire line - cur pos dosn't change
 
 			switch (msg[0]) {
-			case 201 : write(1, "\rZ2 > PLIC  IRQ 11 [BTN0]\r\n", 27); break;
-			case 207 : write(1, "\rZ2 > CLINT IRQ 17 [BTN1]\r\n", 27); break;
-			case 208 : write(1, "\rZ2 > CLINT IRQ 18 [BTN2]\r\n", 27); break;
-			case 211 : write(1, "\rZ2 > CLINT IRQ 21 [BTN1]\r\n", 27); break;
-			case 212 : write(1, "\rZ2 > CLINT IRQ 22 [BTN2]\r\n", 27); break;
+			case 201 : write(1, "\rZ2 > CLIC IRQ 25 [BTN1]\r\n", 26); break;
+			case 202 : write(1, "\rZ2 > CLIC IRQ 25 [BTN2]\r\n", 26); break;
+			case 203 : write(1, "\rZ2 > CLIC IRQ 25 [BTN3]\r\n", 26); break;
+			case 204 : write(1, "\rZ2 > CLIC IRQ 25 [BTN4]\r\n", 26); break;
 			case 'p' : write(1, "\rZ2 > pong\r\n", 12); break;
 			default  : write(1, "\rZ2 > ???\r\n", 11); break;
 			}

@@ -32,17 +32,6 @@
 #define UART_RBR 			0x20	// Receiver Buffer Register (when DLAB = 0) (0x20)
 
 // -----------------------------------------------------------------------------
-// PLIC - AndesStar V5 UM166-10
-// -----------------------------------------------------------------------------
-#define PLIC_BASE 					0xE4000000
-#define PLIC_PRI_OFFSET 			0x0
-#define PLIC_PRI_SHIFT_PER_SOURCE 	0x2
-#define PLIC_IRQ_GPIO_SOURCE		0x7
-#define PLIC_EN_OFFSET				0x2000
-#define PLIC_ENE_SHIFT_PER_TARGET	0x7
-#define PLIC_CLAIM_OFFSET			0x200004
-
-// -----------------------------------------------------------------------------
 // GPIO - Andes ATCGPIO100
 // -----------------------------------------------------------------------------
 #define GPIO_BASE 			0xF0700000
@@ -75,6 +64,5 @@
 #define GPIO_REG(offset) _REG32(GPIO_BASE, offset)
 #define PWM_REG(offset)  _REG32(PWM_BASE, offset)
 #define UART_REG(offset) _REG32(UART_BASE, offset)
-#define PLIC_REG(offset) _REG32(PLIC_BASE, offset)
 
 #endif /* HEXFIVE_PLATFORM_H */
