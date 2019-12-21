@@ -4,19 +4,14 @@ MultiZone® Security Trusted Execution Environment for Andes
 Hex Five's open standard technology provides hardware-enforced software-defined separation of multiple application domains, with full control over data, programs, and peripherals. Contrary to traditional solutions, MultiZone® Security is policy-driven and requires no hypervisor software or hardware support for virtualization: open source libraries, third party binaries, and legacy code can be configured in minutes to achieve unprecedented levels of safety and security. 
 
 MultiZone® Security SDK supports the following Andes IP / boards:
- - Hex Five X300 - RV32ACIMU Core for Xilinx Arty A7-35T FPGA
- - Andes  N25 - RV32ACIMU Core for GOWIN GW2A-55K FPGA
- - SiFive E21 - RV32ACIMU Core for Xilinx Arty A7-35T FPGA 
- - SiFive E31 - RV32ACIMU Core for Xilinx Arty A7-35T FPGA
- - SiFIve E51 - RV64ACIMU Core for Xilinx Arty A7-35T FPGA
- - SiFIve S51 - RV64ACIMU Core for Xilinx Arty A7-35T FPGA
+ - Andes N22/AE250 - RV32ACIMU Board: Andes Corvette F1 FPGA
+ - Andes N25/AE250 - RV32ACIMU Board: GoWin GW2A-55K FPGA
 
-This repository, maintained by Hex Five Security, makes it easy to build robust Trusted Execution Environments on RISC-V cores.
 For Questions or feedback - send email to info 'at' hex-five.com
 
 ### Installation ###
 
-Upload the bitstream to the Arty board following directions from SiFive - https://sifive.cdn.prismic.io/sifive%2Fed96de35-065f-474c-a432-9f6a364af9c8_sifive-e310-arty-gettingstarted-v1.0.6.pdf
+Upload the Andes bitstream to the target board following directions from Andes / GoWin
 
 Install the certified RISC-V toolchain for Linux - directions specific to a fresh Ubuntu 18.04 LTS, other Linux distros generally a subset
  ```
@@ -39,16 +34,9 @@ sudo vi /etc/udev/rules.d/99-openocd.rules
 ```
 Then place the following text in that file if it is not already there
 ```
-# These are for the HiFive1 Board
-SUBSYSTEM=="usb", ATTR{idVendor}=="0403",
-ATTR{idProduct}=="6010", MODE="664", GROUP="plugdev"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0403",
-ATTRS{idProduct}=="6010", MODE="664", GROUP="plugdev"
-# These are for the Olimex Debugger for use with E310 Arty Dev Kit
-SUBSYSTEM=="usb", ATTR{idVendor}=="15ba",
-ATTR{idProduct}=="002a", MODE="664", GROUP="plugdev"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="15ba",
-ATTRS{idProduct}=="002a", MODE="664", GROUP="plugdev"
+# ANDES TECHNOLOGY CORPORATION - Corvette F1 [CON1]
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1cfc",ATTRS{idProduct}=="0000", MODE="664", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor} =="1cfc",ATTR{idProduct} =="0000", MODE="664", GROUP="plugdev"
 ```
 Detach and re-attach the USB devices for these changes to take effect.
 
@@ -62,19 +50,16 @@ export PATH="$PATH:/home/<username>/riscv-gnu-toolchain-20181226/bin"
 ```
 Close and restart the terminal session for these changes to take effect.
 
-### Compile and Upload the Project to the Arty Board ###
+### Bulid the Project for the target board ###
 
 ```
 cd multizone-sdk/
 make clean
-make
+make BOARD=N22
 ```
 
-This will result in a HEX file that is now ready to upload to the Arty board.
-
-```
-make load
-```
+This will result in a multizone.bin file that is now ready forupload to the target.
+Follow instructions provided by Andes / GoWin for the use of the propriertary flash burner utility
 
 ### Operate the Demo ###
 
@@ -87,11 +72,9 @@ The system contains three zones:
    - yield - measure the round trip time through three zones when you yield context
    - stats - complete a number of yield commands and calculate statistics on performance
    - restart - restart the console
- - Zone 2: LED PWM + Interrupts
-   - This Zone is running a modified version of SiFive's coreplexip_welcome demo with trap and emulate functions
-   - Buttons 0-2 are mapped to interrupts in this Zone, they will cause the LED to change color for 5s and send a message to zone 1
-   - These interrupt handlers themselves can be interrupted and resumed by pressing another button before the first handler is complete
- - Zone 3: Robot Control
+ - Zone 2: LEDs, Buttons + Interrupts
+   - Buttons are mapped to interrupts in this zone, pressing the buttons will change the pattern of th eblinking led and send a message to zone 1
+ - Zone 3: OWI Robot Control
    - This zone controls a robot via GPIO; if you do not have the robot then this zone simply yields for you
    - Robot commands are all issued ia messages from zone 1:
      - send 3 > - unfold
