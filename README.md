@@ -58,8 +58,8 @@ make clean
 make BOARD=N22
 ```
 
-This will result in a multizone.bin file that is now ready forupload to the target.
-Follow instructions provided by Andes / GoWin for the use of the propriertary flash burner utility
+This will result in a multizone.bin file that is now ready for upload to the target.
+Follow instructions provided by Andes / GoWin for the use of their propriertary flash burner utilities
 
 ### Operate the Demo ###
 
