@@ -1,5 +1,5 @@
 # multizone-sdk
-MultiZone® Security Trusted Execution Environment for Andes
+MultiZone® Security Trusted Execution Environment for Andes cores
 
 Hex Five's open standard technology provides hardware-enforced software-defined separation of multiple application domains, with full control over data, programs, and peripherals. Contrary to traditional solutions, MultiZone® Security is policy-driven and requires no hypervisor software or hardware support for virtualization: open source libraries, third party binaries, and legacy code can be configured in minutes to achieve unprecedented levels of safety and security. 
 
