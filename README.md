@@ -1,9 +1,9 @@
 # multizone-sdk
-MultiZone™ Security Trusted Execution Environment for any RISC-V platform
+MultiZone® Security Trusted Execution Environment for Andes
 
-MultiZone Security provides policy-based hardware-enforced separation for an unlimited number of security domains, with full control over data, code, peripherals and interrupts.
+Hex Five's open standard technology provides hardware-enforced software-defined separation of multiple application domains, with full control over data, programs, and peripherals. Contrary to traditional solutions, MultiZone® Security is policy-driven and requires no hypervisor software or hardware support for virtualization: open source libraries, third party binaries, and legacy code can be configured in minutes to achieve unprecedented levels of safety and security. 
 
-MultiZone Security SDK supports the following cores / boards:
+MultiZone® Security SDK supports the following Andes IP / boards:
  - Hex Five X300 - RV32ACIMU Core for Xilinx Arty A7-35T FPGA
  - Andes  N25 - RV32ACIMU Core for GOWIN GW2A-55K FPGA
  - SiFive E21 - RV32ACIMU Core for Xilinx Arty A7-35T FPGA 
@@ -112,4 +112,4 @@ The system contains three zones:
   
 ### For More Information ###
 
-See the MultiZone Manual (Pending) or visit [http://www.hex-five.com](https://www.hex-five.com)
+See the MultiZone Manual or visit [http://www.hex-five.com](https://www.hex-five.com)
