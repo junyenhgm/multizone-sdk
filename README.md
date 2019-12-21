@@ -73,10 +73,10 @@ The system contains three zones:
    - stats - complete a number of yield commands and calculate statistics on performance
    - restart - restart the console
  - Zone 2: LEDs, Buttons + Interrupts
-   - Buttons are mapped to interrupts in this zone, pressing the buttons will change the pattern of th eblinking led and send a message to zone 1
+   - Buttons are mapped to interrupts in this zone, pressing the buttons will change the pattern of the blinking led and send a message to zone 1
  - Zone 3: OWI Robot Control
    - This zone controls a robot via GPIO; if you do not have the robot then this zone simply yields for you
-   - Robot commands are all issued ia messages from zone 1:
+   - Robot commands are all issued via messages from zone 1:
      - send 3 > - unfold
      - send 3 1 - begin recursive dance
      - send 3 0 - stop recursive dance when it reaches home
