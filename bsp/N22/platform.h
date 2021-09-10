@@ -1,4 +1,4 @@
-/* Copyright(C) 2018 Hex Five Security, Inc. - All Rights Reserved */
+/* Copyright(C) 2020 Hex Five Security, Inc. - All Rights Reserved */
 
 #ifndef HEXFIVE_PLATFORM_H
 #define HEXFIVE_PLATFORM_H
@@ -7,15 +7,48 @@
 #define RTC_FREQ 	20000000
 
 // -----------------------------------------------------------------------------
-// RTC (MTIME)
+// RTC (CLINT)
 // -----------------------------------------------------------------------------
-#define RTC_BASE	0xE6000000
-#define RTC_MTIME	    0x0000
+#define CLINT_BASE	0xE6000000
+#define CLINT_MTIMECMP  0x0008
+#define CLINT_MTIME	    0x0000
 
 // -----------------------------------------------------------------------------
-// UART - Andes ATCUART100
+// CLIC
 // -----------------------------------------------------------------------------
-#define UART_BASE 	  0xF0300000
+#define CLIC_BASE 	0xE2000000
+#define CLIC_INT_THRESH 	   0x8	// 16.9.3 CLIC Interrupt Level Thresh   0x0008 Extent 4B
+#define CLIC_INT_PENDING	0x1000	// 16.9.4 CLIC Interrupt Pending    0x1000+4*i Extent 1B
+#define CLIC_INT_ENABLE		0x1001	// 16.9.5 CLIC Interrupt Enable     0x1001+4*i Extent 1B
+#define CLIC_INT_ATTR		0x1002	// 16.9.6 CLIC Interrupt Attribute  0x1002+4*i Extent 1B
+#define CLIC_INT_CTRL		0x1003	// 16.9.7 CLIC Interrupt Input Crtl 0x1003+4*i Extent 1B
+
+#define CLIC_SHIFT_PER_SRC 		 2
+
+#define CLIC_SRC_GPIO	25
+#define CLIC_SRC_UART	27
+#define CLIC_SRC_DMA	28
+
+// -----------------------------------------------------------------------------
+// DMA (single channel)
+// ------------------------------------------------------------------------------
+#define DMA_BASE 		0xE0E00000
+
+#define DMA_VER			0x00
+#define DMA_CFG			0x10
+#define DMA_CTRL		0x20
+#define DMA_CH_STATUS	0x30 /* TC: 1<<ch+16, AB: 1<<ch+8,  ERR: 1<<ch+0 */
+#define DMA_CH_ENABLE	0x34 /* 1<<ch */
+#define DMA_CH_ABORT	0x40 /* 1<<ch */
+#define DMA_CH_CTRL		0x44 /* +ch*0x14 */
+#define DMA_TR_SRC		0x48 /* +ch*0x14 */
+#define DMA_TR_DEST		0x4C /* +ch*0x14 */
+#define DMA_TR_SIZE		0x50 /* +ch*0x14 */
+
+// -----------------------------------------------------------------------------
+// UART2 - Andes ATCUART100
+// -----------------------------------------------------------------------------
+#define UART_BASE 	  		0xF0300000
 #define UART_LCR 			0x2C	// Line Control Register (0x2C)
 #define UART_LCR_WLS		0b11	// LCR.WLS 1:0 Word length setting, 0b11 = 8-bit
 #define UART_LCR_STB		1<<2	// LCR.STB Number of STOP bits, 0 = 1 bits
@@ -23,6 +56,8 @@
 #define UART_LCR_DLAB		1<<7	// LCR.DLAB Divisor latch access bit
 #define UART_DLL			0x20	// Divisor Latch LSB (when DLAB = 1) (0x20)
 #define UART_DLM			0x24	// Divisor Latch MSB (when DLAB = 1) (0x24)
+#define UART_IE				0x24	// Interrupt Enable Register (when DLAB = 0) (0x24)
+#define UART_IE_ERBI 		1<<0	// Enable received data available interrupt
 #define UART_FIFOCR			0x28	// FIFO Control Register (0x28)
 #define UART_FIFOCR_FIFOE	1<<0	// FIFO enable
 #define UART_LSR			0x34	// Line Status Register (0x34)
@@ -52,6 +87,22 @@
 #define SMU_PINMUX_CTRL1	0x1004	// PIN MUX control register 1 Section 15.10.12
 
 // -----------------------------------------------------------------------------
+// Buttons (GPIO IRQ)
+// ------------------------------------------------------------------------------
+#define BTN1 1<<1
+#define BTN2 1<<2
+#define BTN3 1<<3
+#define BTN4 1<<4
+
+// -----------------------------------------------------------------------------
+// LEDs (GPIO)
+// ------------------------------------------------------------------------------
+#define LED1 1<<5
+#define LED2 1<<6
+#define LED3 1<<7
+#define LED4 1<<8
+
+// -----------------------------------------------------------------------------
 // C Helper functions
 // -----------------------------------------------------------------------------
 
@@ -59,10 +110,11 @@
 #define _REG32(base, offset) (*(volatile uint32_t *)((base) + (offset)))
 #define _REG16(base, offset) (*(volatile uint16_t *)((base) + (offset)))
 
-#define SMU_REG(offset)  _REG32(SMU_BASE, offset)
-#define RTC_REG(offset)  _REG64(RTC_BASE, offset)
+#define DMA_REG(offset) _REG32(DMA_BASE, offset)
+#define CLIC_REG(offset) _REG32(CLIC_BASE, offset)
 #define GPIO_REG(offset) _REG32(GPIO_BASE, offset)
-#define PWM_REG(offset)  _REG32(PWM_BASE, offset)
 #define UART_REG(offset) _REG32(UART_BASE, offset)
+#define SMU_REG(offset) _REG32(SMU_BASE, offset)
+#define RTC_REG(offset) _REG64(RTC_BASE, offset)
 
 #endif /* HEXFIVE_PLATFORM_H */

@@ -1,161 +1,219 @@
-/* Copyright(C) 2018 Hex Five Security, Inc. - All Rights Reserved */
+/* Copyright(C) 2020 Hex Five Security, Inc. - All Rights Reserved */
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <fcntl.h>
-#include <inttypes.h>
-#include <math.h> // round()
+#include <fcntl.h>	// open()
+#include <unistd.h> // read() write()
+#include <string.h>	// strxxx()
+#include <stdio.h>	// printf() sprintf()
+#include <stdlib.h> // qsort() strtoul()
+#include <limits.h> // UINT_MAX ULONG_MAX
 
-#include <platform.h>
-#include <libhexfive.h>
+#include "platform.h"
+#include "multizone.h"
 
-#define CMD_LINE_SIZE 32
-#define MSG_SIZE 4
 
-void trap_0x0_handler(void)__attribute__((interrupt("user")));
-void trap_0x0_handler(void){
+typedef enum {zone1=1, zone2, zone3, zone4} Zone;
 
-	int msg[MSG_SIZE]={0,0,0,0};
-	ECALL_RECV(1, msg);
-	printf("Instruction address misaligned : 0x%08x 0x%08x 0x%08x \n", msg[0], msg[1], msg[2]);
-
-	printf("\nPress any key to restart");
-	char c='\0'; while(read(0, &c, 1) ==0 ){;} asm ("j _start");
-
+#define BUFFER_SIZE 32
+static volatile struct{
+	char data[BUFFER_SIZE];
+	int r; // read
+	int w; // write
+} buffer;
+int buffer_empty(void){
+	return (buffer.w==0);
 }
 
-void trap_0x1_handler(void)__attribute__((interrupt("user")));
-void trap_0x1_handler(void){
+static char inputline[BUFFER_SIZE+1]="";
 
-	int msg[MSG_SIZE]={0,0,0,0};
-	ECALL_RECV(1, msg);
-	printf("Instruction access fault : 0x%08x 0x%08x 0x%08x \n", msg[0], msg[1], msg[2]);
-	
-	printf("\nPress any key to restart");
-	char c='\0'; while(read(0, &c, 1) ==0 ){;} asm ("j _start");
-
+static volatile char inbox[4][16] = { {'\0'}, {'\0'}, {'\0'}, {'\0'} };
+int inbox_empty(void){
+	return (inbox[0][0]=='\0' && inbox[1][0]=='\0' && inbox[2][0]=='\0' && inbox[3][0]=='\0');
 }
 
-void trap_0x2_handler(void)__attribute__((interrupt("user")));
-void trap_0x2_handler(void){
+__attribute__(( interrupt())) void trap_handler(void){
 
-	int msg[MSG_SIZE]={0,0,0,0};
-	ECALL_RECV(1, msg);
-	printf("Illegal instruction : 0x%08x 0x%08x 0x%08x \n", msg[0], msg[1], msg[2]);
+	#define IRQ (1UL << (__riscv_xlen-1))
 
-}
+	const unsigned long mcause = MZONE_CSRR(CSR_MCAUSE);
+	const unsigned long mepc   = MZONE_CSRR(CSR_MEPC);
+	const unsigned long mtval  = MZONE_CSRR(CSR_MTVAL);
 
-void trap_0x3_handler(void)__attribute__((interrupt("user")));
-void trap_0x3_handler(void){
+	switch(mcause & (IRQ | 0xFFFUL)){ // safe way to read mcause as CLIC adds extra info
 
-	const uint64_t T = ECALL_CSRR_MTIME();
+	case 0 : printf("Instruction address missaligned : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+			 break;
 
-	printf("\e7"); 		// save curs pos
-	printf("\e[r"); 	// scroll all screen
-	printf("\e[2M"); 	// scroll up up
-	printf("\e8");   	// restore curs pos
-	printf("\e[2A"); 	// curs up 2 lines
-	printf("\e[2L"); 	// insert 2 lines
+	case 1 : printf("Instruction access fault : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+			 break;
 
-	printf("\rZ1 > timer expired : %lu", (unsigned long)(T*1000/RTC_FREQ));
+	case 2 : printf("Illegal instruction : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+			 break;
 
-	printf("\e8");   	// restore curs pos
+	case 3 : printf("Breakpoint : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+			 break;
 
-}
+	case 4 : printf("Load address missaligned : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+ 	 	 	 CSRW(mepc, mepc + (*(char *)mepc & (0b11 == 0b11 ? 4 : 2)) ); // skip
+	 	 	 return;
 
-void trap_0x4_handler(void)__attribute__((interrupt("user")));
-void trap_0x4_handler(void){
+	case 5 : printf("Load access fault : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+ 	 	 	 CSRW(mepc, mepc+4); // skip
+	 	 	 return;
 
-	int msg[MSG_SIZE]={0,0,0,0};
-	ECALL_RECV(1, msg);
-	printf("Load address misaligned : 0x%08x 0x%08x 0x%08x \n", msg[0], msg[1], msg[2]);
+	case 6 : printf("Store/AMO address missaligned : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+ 	 	 	 CSRW(mepc, mepc + (*(char *)mepc & (0b11 == 0b11 ? 4 : 2)) ); // skip
+	 	 	 return;
 
-}
+	case 7 : printf("Store access fault : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+	 	 	 CSRW(mepc, mepc + (*(char *)mepc & (0b11 == 0b11 ? 4 : 2)) ); // skip
+	 	 	 return;
 
-void trap_0x5_handler(void)__attribute__((interrupt("user")));
-void trap_0x5_handler(void){
+	case 8 : printf("Environment call from U-mode : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+			 break;
 
-	int msg[MSG_SIZE]={0,0,0,0};
-	ECALL_RECV(1, msg);
-	printf("Load access fault : 0x%08x 0x%08x 0x%08x \n", msg[0], msg[1], msg[2]);
+	case 9 : printf("Environment call from S-mode : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+			 break;
 
-}
+	case 11: printf("Environment call from M-mode : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+			 break;
 
-void trap_0x6_handler(void)__attribute__((interrupt("user")));
-void trap_0x6_handler(void){
+	case IRQ | 3 :	// Software interrupt msip/inbox
 
-	int msg[MSG_SIZE]={0,0,0,0};
-	ECALL_RECV(1, msg);
-	printf("Store/AMO address misaligned : 0x%08x 0x%08x 0x%08x \n", msg[0], msg[1], msg[2]);
+			for (Zone zone = zone1; zone <= zone4; zone++) {
+				char tmp[16];
+				if (MZONE_RECV(zone, tmp))
+					memcpy((char*) &inbox[zone - 1], tmp, sizeof inbox[0]);
+			}
 
-}
+			return;
 
-void trap_0x7_handler(void)__attribute__((interrupt("user")));
-void trap_0x7_handler(void){
+	case IRQ | 7 :	// Machine timer interrupt (one-shot)
+			write(1, "\e7\e[2K", 6);   	// save curs pos & clear entire line
+			printf("\rTimer interrupt : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+			write(1, "\nZ1 > %s", 6); write(1, inputline, strlen(inputline));
+			write(1, "\e8\e[2B", 6);   	// restore curs pos & curs down +2 lines
+			CSRC(mie, 1<<7); 			// disable one-shot timer
+			return;
 
-	int msg[MSG_SIZE]={0,0,0,0};
-	ECALL_RECV(1, msg);
-	printf("Store access fault : 0x%08x 0x%08x 0x%08x \n", msg[0], msg[1], msg[2]);
+	case IRQ | CLIC_SRC_UART :
+			;char tmp[8];
+			int count = read(0, &tmp, sizeof tmp);
+			if (count > 0){
+				//if(buffer.w==BUFFER_SIZE){write(1, "\n>>> BUFFER FULL !!!\n", 21); while(1);}
+				#define MIN(a,b) (((a)<(b))?(a):(b))
+				count = MIN(count, BUFFER_SIZE - buffer.w);
+				memcpy((char *)&buffer.data[buffer.w], tmp, count);
+				buffer.w += count;
+			}
+			return;
+
+#ifdef DMA_BASE
+	case IRQ | CLIC_SRC_DMA :
+			write(1, "\e7\e[2K", 6); // save curs pos & clear entire line
+
+			const uint32_t dma_status = DMA_REG(DMA_CH_STATUS);
+			printf("\rDMA interrupt status 0x%08x \n", (unsigned)dma_status);
+			for (uint8_t ch=0; ch<8; ch++){
+				const uint32_t cs = dma_status & (0x00010101<<ch);
+				if (cs){
+					printf("channel : %d %s \n", ch, (cs > 0xFFFF ? "complete" : cs > 0xFF ? "abort" : "error"));
+					printf("source  : 0x%08x \n", (unsigned)DMA_REG(DMA_TR_SRC  + ch*0x14));
+					printf("dest    : 0x%08x \n", (unsigned)DMA_REG(DMA_TR_DEST + ch*0x14));
+					printf("size    : 0x%08x \n", (unsigned)DMA_REG(DMA_TR_SIZE + ch*0x14));
+				}
+			}
+
+			write(1, "\e8\e[6B", 6); // restore curs pos & curs down +6
+			DMA_REG(DMA_CH_STATUS) |= 0xFFFFFF; // clear all pending irqs (R/W1C)
+			return;
+#endif
+
+	default : printf("Exception : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
+
+	}
+
+	printf("Press any key to restart \n");
+	char c='\0'; while(read(0, &c, 1) ==0 ){;} asm ("j _start"); // blocking loop
 
 }
 
 // ------------------------------------------------------------------------
-void print_cpu_info(void) {
+ void print_sys_info(void) {
 // ------------------------------------------------------------------------
 
 	// misa
-	uint64_t misa = 0x0; asm volatile("csrr %0, misa" : "=r"(misa)); // trap & emulate example
-	//const uint64_t misa = ECALL_CSRR_MISA();
-
-	const int xlen = ((misa >> __riscv_xlen-2)&0b11)==1 ?  32 :
-					 ((misa >> __riscv_xlen-2)&0b11)==2 ?  64 :
-					 ((misa >> __riscv_xlen-2)&0b11)==1 ? 128 : 0;
-
+	unsigned long misa;	asm volatile ("csrr %0, misa" : "=r"(misa) : );
+//	const unsigned long misa = CSRR(misa);
+	const int xlen = ((misa >> (__riscv_xlen-2))&0b11)==1 ?  32 :
+					 ((misa >> (__riscv_xlen-2))&0b11)==2 ?  64 :
+					 ((misa >> (__riscv_xlen-2))&0b11)==1 ? 128 :
+							 	 	 	 	 	 	 	 	0 ;
 	char misa_str[26+1]="";
 	for (int i=0, j=0; i<26; i++)
 		if ( (misa & (1ul << i)) !=0){
 			misa_str[j++]=(char)('A'+i); misa_str[j]='\0';
 		}
-
 	printf("Machine ISA   : 0x%08x RV%d %s \n", (int)misa, xlen, misa_str);
 
-	// mvendorid
-	const uint64_t mvendorid = ECALL_CSRR_MVENDID();
+	// mvendid
+	const unsigned long  mvendorid = CSRR(mvendorid);
 	const char *mvendorid_str = (mvendorid==0x10e31913 ? "SiFive, Inc.\0" :
-						         mvendorid==0x489      ? "SiFive, Inc.\0" :
+							     mvendorid==0x489      ? "SiFive, Inc.\0" :
 								 mvendorid==0x31e      ? "Andes Technology\0" :
-								 mvendorid==0x57c      ? "Hex Five, Inc.\0" :
-												         "\0");
+							     mvendorid==0x57c      ? "Hex Five, Inc.\0" :
+							    		 	 	 	 	 "\0");
 	printf("Vendor        : 0x%08x %s \n", (int)mvendorid, mvendorid_str);
 
 	// marchid
-	const uint64_t marchid = ECALL_CSRR_MARCHID();
+	const unsigned long  marchid = CSRR(marchid);
 	const char *marchid_str = (mvendorid==0x489 && (int)misa==0x40101105    && marchid==0x80000002 ? "E21\0"  :
 							   mvendorid==0x489 && (int)misa==0x40101105    && marchid==0x00000001 ? "E31\0"  :
 						       mvendorid==0x489 && misa==0x8000000000101105 && marchid==0x00000001 ? "S51\0"  :
-						       mvendorid==0x31e && (int)misa==0x40901105    && marchid==0x80000022 ? "N22\0" :
 						       mvendorid==0x57c && (int)misa==0x40101105    && marchid==0x00000001 ? "X300\0" :
+							   mvendorid==0x31e && (int)misa==0x40901105    && marchid==0x80000022 ? "N22\0" :
 						       "\0");
 	printf("Architecture  : 0x%08x %s \n", (int)marchid, marchid_str);
 
 	// mimpid
-	const uint64_t mimpid = ECALL_CSRR_MIMPID();
-	printf("Implementation: 0x%08x \n", (int)mimpid );
+	printf("Implementation: 0x%08x \n", (unsigned)CSRR(mimpid) );
 
 	// mhartid
-	const uint64_t mhartid = ECALL_CSRR_MHARTID();
-	printf("Hart ID       : 0x%08x \n", (int)mhartid );
+	printf("Hart id       : 0x%1x \n", (unsigned)CSRR(mhartid) );
 
-	// CPU Clock
-	const int cpu_clk = round(CPU_FREQ/1E+6);
-	printf("CPU clock     : %d MHz \n", cpu_clk );
+	// CPU clk
+	printf("CPU clock     : %d MHz \n", (int)(CPU_FREQ/1E+6) );
+
+	// RTC clk
+	if (RTC_FREQ < 1E+6)
+		printf("RTC clock     : %d KHz \n", (int)(RTC_FREQ/1E+3) );
+	else
+		printf("RTC clock     : %d MHz \n", (int)(RTC_FREQ/1E+6) );
+
+	// Platform info
+
+	printf(" \n");
+
+#ifdef PLIC_BASE
+	printf("PLIC @0x%08x \n", (unsigned)CLIC_BASE);
+#endif
+#ifdef CLIC_BASE
+	printf("CLIC @0x%08x \n", (unsigned)CLIC_BASE);
+#endif
+#ifdef DMA_BASE
+	printf("DMAC @0x%08x \n", (unsigned)DMA_BASE);
+#endif
+#ifdef UART_BASE
+	printf("UART @0x%08x \n", (unsigned)UART_BASE);
+#endif
+#ifdef GPIO_BASE
+	printf("GPIO @0x%08x \n", (unsigned)GPIO_BASE);
+#endif
 
 }
 
 // ------------------------------------------------------------------------
-int cmpfunc(const void* a , const void* b){
-// ------------------------------------------------------------------------
+ int cmpfunc(const void* a, const void* b){
+
     const int ai = *(const int* )a;
     const int bi = *(const int* )b;
     return ai < bi ? -1 : ai > bi ? 1 : 0;
@@ -163,45 +221,66 @@ int cmpfunc(const void* a , const void* b){
 
 // ------------------------------------------------------------------------
 void print_stats(void){
-// ------------------------------------------------------------------------
 
-	#define COUNT (10+1) // odd values for median
 	#define MHZ (CPU_FREQ/1000000)
+	const int COUNT = 11; // odd values for accurate median
+	int cycles[COUNT], instrs[COUNT];
 
-	int cycles[COUNT];
+	for (int i=0; i<COUNT; i++){
 
-	for (int i=0, first=1; i<COUNT; i++){
+		const unsigned long I1 = MZONE_CSRR(CSR_MINSTRET);
+		const unsigned long C1 = MZONE_CSRR(CSR_MCYCLE);
+		MZONE_YIELD();
+		const unsigned long I2 = MZONE_CSRR(CSR_MINSTRET);
+		const unsigned long C2 = MZONE_CSRR(CSR_MCYCLE);
 
-		volatile unsigned long C1 = ECALL_CSRR_MCYCLE();
-		ECALL_YIELD();
-		volatile unsigned long C2 = ECALL_CSRR_MCYCLE();
-
-		cycles[i] = C2-C1;
-
-		if (first) {first=0; i--;} // ignore 1st reading (prime cache)
+		cycles[i] = C2-C1; instrs[i] = I2-I1;
 
 	}
 
-	int max_cycle = 0; for (int i=0; i<COUNT; i++)
-		max_cycle = cycles[i] > max_cycle ? cycles[i] : max_cycle;
-	char str[16]; sprintf(str, "%lu", max_cycle); const int max_col = strlen(str);
+	int max_cycle = 0;
+	for (int i=0; i<COUNT; i++)	max_cycle = (cycles[i] > max_cycle ? cycles[i] : max_cycle);
+	char str[16]; sprintf(str, "%d", max_cycle); const int col_len = strlen(str);
+
 	for (int i=0; i<COUNT; i++)
-		printf("%*d cycles in %*d us \n", max_col, cycles[i], max_col-2, (int)(cycles[i]/MHZ));
+		printf("%*d instr %*d cycles %*d us \n", col_len, instrs[i], col_len, cycles[i], col_len, cycles[i]/MHZ);
 
 	qsort(cycles, COUNT, sizeof(int), cmpfunc);
+	qsort(instrs, COUNT, sizeof(int), cmpfunc);
 
-	printf("------------------------------------------------\n");
-	int min = cycles[0], med = cycles[COUNT/2], max = cycles[COUNT-1];
-	printf("cycles  min/med/max = %d/%d/%d \n", min, med, max);
-	printf("time    min/med/max = %d/%d/%d us \n", (int)min/MHZ, (int)med/MHZ, (int)max/MHZ);
+	printf("-----------------------------------------\n");
+    int min = instrs[0], med = instrs[COUNT/2], max = instrs[COUNT-1];
+    printf("instrs min/med/max = %d/%d/%d \n", min, med, max);
+	min = cycles[0], med = cycles[COUNT/2], max = cycles[COUNT-1];
+	printf("cycles min/med/max = %d/%d/%d \n", min, med, max);
+	printf("time   min/med/max = %d/%d/%d us \n", min/MHZ, med/MHZ, max/MHZ);
 
-	volatile unsigned ctxsw_cycle = ECALL_CSRR_MHPMC3();
-	volatile unsigned ctxsw_instr = ECALL_CSRR_MHPMC4();
-	if (ctxsw_instr>0 && cycles>0){ // mhpmcounters might not be implemented
+	// Kernel stats (#ifdef STATS)
+	const unsigned irq_instr_min = (unsigned)(MZONE_CSRR(CSR_MHPMCOUNTER26) & 0xFFFF);
+	const unsigned irq_instr_max = (unsigned)(MZONE_CSRR(CSR_MHPMCOUNTER26) >>16);
+	const unsigned irq_cycle_min = (unsigned)(MZONE_CSRR(CSR_MHPMCOUNTER27) & 0xFFFF);
+	const unsigned irq_cycle_max = (unsigned)(MZONE_CSRR(CSR_MHPMCOUNTER27) >>16);
+	const unsigned long instr_min = MZONE_CSRR(CSR_MHPMCOUNTER28);
+	const unsigned long instr_max = MZONE_CSRR(CSR_MHPMCOUNTER29);
+	const unsigned long cycle_min = MZONE_CSRR(CSR_MHPMCOUNTER30);
+	const unsigned long cycle_max = MZONE_CSRR(CSR_MHPMCOUNTER31); // <= resets kern stats
+
+	if (instr_min>0){
+
 		printf("\n");
-		printf("ctx sw instr  = %lu \n", ctxsw_instr);
-		printf("ctx sw cycles = %lu \n", ctxsw_cycle);
-		printf("ctx sw time   = %d us \n", (int)(ctxsw_cycle/MHZ));
+		printf("Kernel time\n");
+		printf("-----------------------------------------\n");
+		printf("instrs min/max = %lu/%lu \n", instr_min, instr_max);
+		printf("cycles min/max = %lu/%lu \n", cycle_min, cycle_max);
+		printf("time   min/max = %lu/%lu us\n", cycle_min/MHZ, cycle_max/MHZ);
+
+		printf("\n");
+		printf("IRQ latency\n");
+		printf("-----------------------------------------\n");
+		printf("instrs min/max = %d/%d \n", irq_instr_min, irq_instr_max);
+		printf("cycles min/max = %d/%d \n", irq_cycle_min, irq_cycle_max);
+		printf("time   min/max = %d/%d us\n", irq_cycle_min/MHZ, irq_cycle_max/MHZ);
+
 	}
 
 }
@@ -218,10 +297,10 @@ void print_pmp(void){
 	#define PMP_W 1<<1
 	#define PMP_X 1<<2
 
-	volatile uint64_t pmpcfg=0x0;
+	uint64_t pmpcfg=0x0;
 #if __riscv_xlen==32
-	volatile uint32_t pmpcfg0; asm ( "csrr %0, pmpcfg0" : "=r"(pmpcfg0) );
-	volatile uint32_t pmpcfg1; asm ( "csrr %0, pmpcfg1" : "=r"(pmpcfg1) );
+	uint32_t pmpcfg0; asm ( "csrr %0, pmpcfg0" : "=r"(pmpcfg0) );
+	uint32_t pmpcfg1; asm ( "csrr %0, pmpcfg1" : "=r"(pmpcfg1) );
 	pmpcfg = pmpcfg1;
 	pmpcfg <<= 32;
 	pmpcfg |= pmpcfg0;
@@ -229,11 +308,7 @@ void print_pmp(void){
 	asm ( "csrr %0, pmpcfg0" : "=r"(pmpcfg) );
 #endif
 
-#if __riscv_xlen==32
-	uint32_t pmpaddr[8];
-#else
-	uint64_t pmpaddr[8];
-#endif
+	unsigned long pmpaddr[8];
 	asm ( "csrr %0, pmpaddr0" : "=r"(pmpaddr[0]) );
 	asm ( "csrr %0, pmpaddr1" : "=r"(pmpaddr[1]) );
 	asm ( "csrr %0, pmpaddr2" : "=r"(pmpaddr[2]) );
@@ -249,7 +324,7 @@ void print_pmp(void){
 
 		char rwx[3+1] = {cfg & PMP_R ? 'r':'-', cfg & PMP_W ? 'w':'-', cfg & PMP_X ? 'x':'-', '\0'};
 
-		uint64_t start=0, end=0;
+		unsigned long start=0, end=0;
 
 		char type[5+1]="";
 
@@ -276,272 +351,350 @@ void print_pmp(void){
 
 		} else break;
 
-#if __riscv_xlen==32
-		printf("0x%08x 0x%08x %s %s \n", (unsigned int)start, (unsigned int)end, rwx, type);
-#else
-		printf("0x%08" PRIX64 " 0x%08" PRIX64 " %s %s \n", start, end, rwx, type);
-#endif
+		printf("0x%08x 0x%08x %s %s \n", (unsigned)start, (unsigned)end, rwx, type);
 
 	}
 
 }
 
 // ------------------------------------------------------------------------
- int readline(char *cmd_line) {
+void msg_handler() {
+
+	CSRC(mie, 1<<3);
+
+		for (Zone zone=zone1; zone<=zone4; zone++){
+
+			if (inbox[zone-1][0] != '\0') {
+
+				if (strcmp("ping", (const char *) inbox[zone-1]) == 0) {
+					MZONE_SEND(zone, (char[16]){"pong"});
+
+				} else {
+					write(1, "\e7\e[2K", 6);   // save curs pos & clear entire line
+					printf("\rZ%d > %.16s\n", zone, inbox[zone-1]);
+					write(1, "\nZ1 > ", 6); write(1, inputline, strlen(inputline));
+					write(1, "\e8\e[2B", 6);   // restore curs pos & curs down 2x
+				}
+
+				inbox[zone-1][0] = '\0';
+
+			}
+
+		}
+
+	CSRS(mie, 1<<3);
+
+}
+
 // ------------------------------------------------------------------------
-	int p=0;
-	char c='\0';
-	int esc=0;
-	cmd_line[0] = '\0';
-	static char history[CMD_LINE_SIZE+1]="";
+void cmd_handler(){
 
-	while(c!='\r'){
+	char * tk[9]; tk[0] = strtok(inputline, " "); for (int i=1; i<9; i++) tk[i] = strtok(NULL, " ");
 
-		if ( read(0, &c, 1) >0 ) {
+	if (tk[0] == NULL) tk[0] = "help";
 
-			if (c=='\e'){
-				esc=1;
+	// --------------------------------------------------------------------
+	if (strcmp(tk[0], "load")==0){
+	// --------------------------------------------------------------------
+		if (tk[1] != NULL){
+			uint8_t data = 0x00;
+			const unsigned long addr = strtoul(tk[1], NULL, 16);
+			asm ("lbu %0, (%1)" : "+r"(data) : "r"(addr));
+			printf("0x%08x : 0x%02x \n", (unsigned int)addr, data);
+		} else printf("Syntax: load address \n");
 
-			} else if (esc==1 && c=='['){
-				esc=2;
+	// --------------------------------------------------------------------
+	} else if (strcmp(tk[0], "store")==0){
+	// --------------------------------------------------------------------
+		if (tk[1] != NULL && tk[2] != NULL){
+			const uint32_t data = (uint32_t)strtoul(tk[2], NULL, 16);
+			const unsigned long addr = strtoul(tk[1], NULL, 16);
 
-			} else if (esc==2 && c=='3'){
-				esc=3;
+			if ( strlen(tk[2]) <=2 )
+				asm ( "sb %0, (%1)" : : "r"(data), "r"(addr));
+			else if ( strlen(tk[2]) <=4 )
+				asm ( "sh %0, (%1)" : : "r"(data), "r"(addr));
+			else
+				asm ( "sw %0, (%1)" : : "r"(data), "r"(addr));
 
-			} else if (esc==3 && c=='~'){ // del key
-				for (int i=p; i<strlen(cmd_line); i++) cmd_line[i]=cmd_line[i+1];
-				write(1, "\e7", 2); // save curs pos
-				write(1, "\e[K", 3); // clear line from curs pos
-				write(1, &cmd_line[p], strlen(cmd_line)-p);
-				write(1, "\e8", 2); // restore curs pos
-				esc=0;
+			printf("0x%08x : 0x%02x \n", (unsigned int)addr, (unsigned int)data);
+		} else printf("Syntax: store address data \n");
 
-			} else if (esc==2 && c=='C'){ // right arrow
-				esc=0;
-				if (p < strlen(cmd_line)){
-					p++;
-					write(1, "\e[C", 3);
-				}
+	// --------------------------------------------------------------------
+	} else if (strcmp(tk[0], "exec")==0){
+	// --------------------------------------------------------------------
+		if (tk[1] != NULL){
+			const unsigned long addr = strtoul(tk[1], NULL, 16);
+			asm ( "jr (%0)" : : "r"(addr));
+		} else printf("Syntax: exec address \n");
 
-			} else if (esc==2 && c=='D'){ // left arrow
-				esc=0;
-				if (p>0){
-					p--;
-					write(1, "\e[D", 3);
-				}
+	// --------------------------------------------------------------------
+	} else if (strcmp(tk[0], "send")==0){
+	// --------------------------------------------------------------------
+		if (tk[1] != NULL && tk[1][0]>='1' && tk[1][0]<='4' && tk[2] != NULL){
+			char msg[16]; strncpy(msg, tk[2], 16);
+			if (!MZONE_SEND( tk[1][0]-'0', msg) )
+				printf("Error: Inbox full.\n");
+		} else printf("Syntax: send {1|2|3|4} message \n");
 
-			} else if (esc==2 && c=='A'){ // up arrow
-				esc=0;
-				if (strlen(history)>0){
-					p=strlen(history);
-					strcpy(cmd_line, history);
-					write(1, "\e[2K", 4); // 2K clear entire line - cur pos dosn't change
-					write(1, "\rZ1 > ", 6);
-					write(1, &cmd_line[0], strlen(cmd_line));
-				}
+	// --------------------------------------------------------------------
+	} else if (strcmp(tk[0], "recv")==0){
+	// --------------------------------------------------------------------
+		if (tk[1] != NULL && tk[1][0]>='1' && tk[1][0]<='4'){
+			char msg[16];
+			if (MZONE_RECV(tk[1][0]-'0', msg))
+				printf("msg : %.16s\n", msg);
+			else
+				printf("Error: Inbox empty.\n");
+		} else printf("Syntax: recv {1|2|3|4} \n");
 
-			} else if (esc==2 && c=='B'){ // down arrow
-				esc=0;
+	// --------------------------------------------------------------------
+	} else if (strcmp(tk[0], "yield")==0){
+	// --------------------------------------------------------------------
+		const unsigned long C1 = MZONE_CSRR(CSR_MCYCLE);
+		MZONE_YIELD();
+		const unsigned long C2 = MZONE_CSRR(CSR_MCYCLE);
+		const unsigned long C = C2-C1;
+		const int T = C/(CPU_FREQ/1000000);
+		printf( (C>0 ? "yield : elapsed cycles %d / time %dus \n" : "yield : n/a \n"), (int)C, T);
 
-			} else if ((c=='\b' || c=='\x7f') && p>0 && esc==0){ // backspace
-				p--;
-				for (int i=p; i<strlen(cmd_line); i++) cmd_line[i]=cmd_line[i+1];
-				write(1, "\e[D", 3);
-				write(1, "\e7", 2);
-				write(1, "\e[K", 3);
-				write(1, &cmd_line[p], strlen(cmd_line)-p);
-				write(1, "\e8", 2);
+	// --------------------------------------------------------------------
+	} else if (strcmp(tk[0], "timer")==0){
+	// --------------------------------------------------------------------
+		if (tk[1] != NULL){
+			const uint64_t ms = abs(strtoull(tk[1], NULL, 10));
+			const uint64_t T0 = MZONE_RDTIME();
+			const uint64_t T1 = T0 + ms*RTC_FREQ/1000;
+			printf("timer set T0=%lu, T1=%lu \n", (unsigned long)(T0*1000/RTC_FREQ),
+												  (unsigned long)(T1*1000/RTC_FREQ) );
+			MZONE_WRTIMECMP(T1); CSRS(mie, 1<<7); // one-shot timer
+		} else printf("Syntax: timer ms \n");
 
-			} else if (c>=' ' && c<='~' && p < CMD_LINE_SIZE && esc==0){
-				for (int i = CMD_LINE_SIZE-1; i > p; i--) cmd_line[i]=cmd_line[i-1]; // make room for 1 ch
-				cmd_line[p]=c;
-				write(1, "\e7", 2); // save curs pos
-				write(1, "\e[K", 3); // clear line from curs pos
-				write(1, &cmd_line[p], strlen(cmd_line)-p); p++;
-				write(1, "\e8", 2); // restore curs pos
-				write(1, "\e[C", 3); // move curs right 1 pos
+	// --------------------------------------------------------------------
+	} else if (strcmp(tk[0], "stats")==0)	print_stats();
+	// --------------------------------------------------------------------
 
-			} else
-				esc=0;
-		}
+	// --------------------------------------------------------------------
+	else if (strcmp(tk[0], "restart")==0) asm ("j _start");
+	// --------------------------------------------------------------------
 
-		// poll & print incoming messages
-		int msg[MSG_SIZE]={0,0,0,0};
+	// --------------------------------------------------------------------
+	else if (strcmp(tk[0], "pmp")==0) print_pmp();
+	// --------------------------------------------------------------------
 
-		if (ECALL_RECV(3, msg)){
+	// --------------------------------------------------------------------
+	else if (strcmp(tk[0], "ecall")==0) asm ("ecall"); // test
+	// --------------------------------------------------------------------
 
+	// --------------------------------------------------------------------
+	else if (strcmp(tk[0], "csrr")==0){ // test
+	// --------------------------------------------------------------------
+		volatile unsigned long regval;
+		unsigned long C0 = MZONE_CSRR(CSR_MCYCLE);
+		  //asm volatile( "csrr %0, ustatus" : "=r"(regval) ); // illegal
+		    asm volatile( "csrr %0, mip" : "=r"(regval) );
+		  //regval = CSRR(mip);
+		  //regval = MZONE_CSRR(CSR_MIP);
+		unsigned long C1 = MZONE_CSRR(CSR_MCYCLE);
+		printf( "0x%08x (%d cycles) \n", (unsigned)regval, (int)(C1-C0) );
+
+#ifdef DMA_BASE
+	// --------------------------------------------------------------------
+	} else if (strcmp(tk[0], "dma")==0){
+	// --------------------------------------------------------------------
+		if (tk[1] != NULL && tk[2] != NULL && tk[3] != NULL){
+
+			const uint32_t srcWid = (tk[4] == NULL ? 0 : strtoul(tk[4],NULL,10) & 0b011);
+			const uint32_t dstWid = (tk[5] == NULL ? 0 : strtoul(tk[5],NULL,10) & 0b011);
+			const uint32_t srcCtr = (tk[6] == NULL ? 0 : strtoul(tk[6],NULL,10) & 0b011);
+			const uint32_t dstCtr = (tk[7] == NULL ? 0 : strtoul(tk[7],NULL,10) & 0b011);
+			const uint32_t ch     = (tk[8] == NULL ? 0 : strtoul(tk[8],NULL,10) & 0b111);
+			const uint32_t chCtrl = srcWid<<20 | dstWid<<18 | srcCtr<<14 | dstCtr<<12;
+
+			DMA_REG(DMA_TR_SRC +ch*0x14) = strtoul(tk[1], NULL, 16);
+			DMA_REG(DMA_TR_DEST+ch*0x14) = strtoul(tk[2], NULL, 16);
+			DMA_REG(DMA_TR_SIZE+ch*0x14) = strtoul(tk[3], NULL, 10);
+			DMA_REG(DMA_CH_CTRL+ch*0x14) = chCtrl | (1<<0); // enable ch (start transfer)
+
+		} else printf("Syntax: dma src dst size [srcWidth dstWidth srcAddrCtrl dstAddrCtrl ch] \n");
+#endif
+
+	} else {
+		printf("Commands: yield send recv pmp load store exec stats timer restart ");
+#ifdef DMA_REG
+		printf("dma ");
+#endif
+		printf("\n");
+	}
+
+}
+
+// ------------------------------------------------------------------------
+int readline() {
+// ------------------------------------------------------------------------
+
+	static int p=0;
+	static int esc=0;
+	static char history[8][sizeof(inputline)]={"","","","","","","",""}; static int h=-1;
+
+	int eol = 0; // end of line
+	
+		while ( !eol && buffer.w > buffer.r ) {
+
+		CLIC_REG(CLIC_INT_PENDING+(CLIC_SRC_UART<<CLIC_SHIFT_PER_SRC)) &= ~0x100;
+			const char c = buffer.data[buffer.r++];
+			if (buffer.r >= buffer.w) {buffer.r = 0; buffer.w = 0;}
+		CLIC_REG(CLIC_INT_PENDING+(CLIC_SRC_UART<<CLIC_SHIFT_PER_SRC)) |= 0x100;
+
+		if (c=='\e'){
+			esc=1;
+
+		} else if (esc==1 && c=='['){
+			esc=2;
+
+		} else if (esc==2 && c=='3'){
+			esc=3;
+
+		} else if (esc==3 && c=='~'){ // del key
+			for (int i=p; i<strlen(inputline); i++) inputline[i]=inputline[i+1];
 			write(1, "\e7", 2); // save curs pos
-			write(1, "\e[2K", 4); // 2K clear entire line - cur pos dosn't change
+			write(1, "\e[K", 3); // clear line from curs pos
+			write(1, &inputline[p], strlen(inputline)-p);
+			write(1, "\e8", 2); // restore curs pos
+			esc=0;
 
-			switch (msg[0]) {
-			case 1   : write(1, "\rZ3 > USB DEVICE ATTACH VID=0x1267 PID=0x0000\r\n", 47); break;
-			case 2   : write(1, "\rZ3 > USB DEVICE DETACH\r\n", 25); break;
-			case 331 : write(1, "\rZ3 > CLINT IRQ 23 [BTN3]\r\n", 27); break;
-			case 'p' : write(1, "\rZ3 > pong\r\n", 12); break;
-			default  : write(1, "\rZ3 > ???\r\n", 11); break;
+		} else if (esc==2 && c=='C'){ // right arrow
+			esc=0;
+			if (p < strlen(inputline)){
+				p++;
+				write(1, "\e[C", 3);
 			}
 
-			write(1, "\nZ1 > ", 6);
-			write(1, &cmd_line[0], strlen(cmd_line));
-			write(1, "\e8", 2);   // restore curs pos
-			write(1, "\e[2B", 4); // curs down down
-		}
-
-		if (ECALL_RECV(2, msg)){
-
-			write(1, "\e7", 2);   // save curs pos
-			write(1, "\e[2K", 4); // 2K clear entire line - cur pos dosn't change
-
-			switch (msg[0]) {
-			case 201 : write(1, "\rZ2 > CLIC IRQ 25 [BTN1]\r\n", 26); break;
-			case 202 : write(1, "\rZ2 > CLIC IRQ 25 [BTN2]\r\n", 26); break;
-			case 203 : write(1, "\rZ2 > CLIC IRQ 25 [BTN3]\r\n", 26); break;
-			case 204 : write(1, "\rZ2 > CLIC IRQ 25 [BTN4]\r\n", 26); break;
-			case 'p' : write(1, "\rZ2 > pong\r\n", 12); break;
-			default  : write(1, "\rZ2 > ???\r\n", 11); break;
+		} else if (esc==2 && c=='D'){ // left arrow
+			esc=0;
+			if (p>0){
+				p--;
+				write(1, "\e[D", 3);
 			}
 
-			write(1, "\nZ1 > ", 6);
-			write(1, &cmd_line[0], strlen(cmd_line));
-			write(1, "\e8", 2);   // restore curs pos
-			write(1, "\e[2B", 4); // curs down down
-		}
+		} else if (esc==2 && c=='A'){ // up arrow (history)
+			esc=0;
+			if (h<8-1 && strlen(history[h+1])>0){
+				h++;
+				strcpy(inputline, history[h]);
+				write(1, "\e[2K", 4); // 2K clear entire line - cur pos dosn't change
+				write(1, "\rZ1 > ", 6);
+				write(1, inputline, strlen(inputline));
+				p=strlen(inputline);
 
-		ECALL_YIELD();
+			}
+
+		} else if (esc==2 && c=='B'){ // down arrow (history)
+			esc=0;
+			if (h>0 && strlen(history[h-1])>0){
+				h--;
+				strcpy(inputline, history[h]);
+				write(1, "\e[2K", 4); // 2K clear entire line - cur pos dosn't change
+				write(1, "\rZ1 > ", 6);
+				write(1, inputline, strlen(inputline));
+				p=strlen(inputline);
+			}
+
+		} else if ((c=='\b' || c=='\x7f') && p>0 && esc==0){ // backspace
+			p--;
+			for (int i=p; i<strlen(inputline); i++) inputline[i]=inputline[i+1];
+			write(1, "\e[D", 3);
+			write(1, "\e7", 2);
+			write(1, "\e[K", 3);
+			write(1, &inputline[p], strlen(inputline)-p);
+			write(1, "\e8", 2);
+
+		} else if (c>=' ' && c<='~' && p < sizeof(inputline)-1 && esc==0){
+			for (int i = sizeof(inputline)-1-1; i > p; i--) inputline[i]=inputline[i-1]; // make room for 1 ch
+			inputline[p]=c;
+			write(1, "\e7", 2); // save curs pos
+			write(1, "\e[K", 3); // clear line from curs pos
+			write(1, &inputline[p], strlen(inputline)-p); p++;
+			write(1, "\e8", 2); // restore curs pos
+			write(1, "\e[C", 3); // move curs right 1 pos
+
+		} else if (c=='\r') {
+			p=0; esc=0; eol = 1;
+			// trim
+			while (inputline[strlen(inputline)-1]==' ') inputline[strlen(inputline)-1]='\0';
+			while (inputline[0]==' ') for (int i = 0; i < strlen(inputline); i++) inputline[i]=inputline[i+1];
+			// save line to history
+			if (strlen(inputline)>0 && strcmp(inputline, history[0])!=0){
+				for (int i = 8-1; i > 0; i--) strcpy(history[i], history[i-1]);
+				strcpy(history[0], inputline);
+			} h = -1;
+			write(1, "\n", 1);
+
+		} else
+			esc=0;
 
 	}
 
-	for (int i = CMD_LINE_SIZE-1; i > 0; i--)
-		if (cmd_line[i]==' ') cmd_line[i]='\0';	else break;
-
-	if (strlen(cmd_line)>0)
-		strcpy(history, cmd_line);
-
-	return strlen(cmd_line);
+	return eol;
 
 }
 
 // ------------------------------------------------------------------------
 int main (void) {
-// ------------------------------------------------------------------------
 
-	//volatile int w=0; while(1){w++;}
-	//while(1) ECALL_YIELD();
+	//while(1) MZONE_WFI();
+	//while(1) MZONE_YIELD();
+	//while(1);
 
-	ECALL_TRP_VECT(0x0, trap_0x0_handler); // 0x0 Instruction address misaligned
-	ECALL_TRP_VECT(0x1, trap_0x1_handler); // 0x1 Instruction access fault
-	ECALL_TRP_VECT(0x2, trap_0x2_handler); // 0x2 Illegal Instruction
-	ECALL_TRP_VECT(0x3, trap_0x3_handler); // 0x3 Soft timer
-    ECALL_TRP_VECT(0x4, trap_0x4_handler); // 0x4 Load address misaligned
-    ECALL_TRP_VECT(0x5, trap_0x5_handler); // 0x5 Load access fault
-    ECALL_TRP_VECT(0x6, trap_0x6_handler); // 0x6 Store/AMO address misaligned
-	ECALL_TRP_VECT(0x7, trap_0x7_handler); // 0x7 Store access fault
+	CSRW(mtvec, trap_handler); // register trap handler
+
+    CLIC_REG(CLIC_INT_PENDING+(CLIC_SRC_UART<<CLIC_SHIFT_PER_SRC)) |= 0x100; // enable local interrupt
+    CLIC_REG(CLIC_INT_PENDING+(CLIC_SRC_DMA<<CLIC_SHIFT_PER_SRC))  |= 0x100; // enable local interrupt
+
+    CSRS(mie, 1<<3); // software interrupt pending msip/inbox
+
+    CSRS(mstatus, 1<<3); // enable global interrupts
 
 	open("UART", 0, 0);
 
 	printf("\e[2J\e[H"); // clear terminal screen
+
 	printf("=====================================================================\n");
-	printf("      	           Hex Five MultiZone(TM) Security                   \n");
-	printf("    Copyright (C) 2018 Hex Five Security Inc. All Rights Reserved    \n");
+	printf("      	             Hex Five MultiZone® Security                    \n");
+	printf("    Copyright© 2020 Hex Five Security, Inc. - All Rights Reserved    \n");
 	printf("=====================================================================\n");
-	printf("This version of MultiZone(TM) is meant for evaluation purposes only. \n");
-	printf("As such, use of this software is governed by your Evaluation License.\n");
-	printf("There may be other functional limitations as described in the        \n");
-	printf("evaluation kit documentation. The full version of the software does  \n");
-	printf("not have these restrictions.                                         \n");
+	printf("This version of MultiZone® Security is meant for evaluation purposes \n");
+	printf("only. As such, use of this software is governed by the Evaluation    \n");
+	printf("License. There may be other functional limitations as described in   \n");
+	printf("the evaluation SDK documentation. The commercial version of the      \n");
+	printf("software does not have these restrictions.                           \n");
 	printf("=====================================================================\n");
 
-    print_cpu_info();
+    print_sys_info();
 
-	char cmd_line[CMD_LINE_SIZE+1]="";
-	int msg[MSG_SIZE]={0,0,0,0};
+	write(1, "\n\rZ1 > ", 7);
 
-	while(1){
+    while(1){
 
-		write(1, "\n\rZ1 > ", 7);
+    	// UART RX event handler
+		if (readline()){
+			cmd_handler(); //printf("%s\n", inputline);
+			write(1, "\n\rZ1 > ", 7);
+			inputline[0]='\0';
+		}
 
-		readline(cmd_line);
+    	// Inbox event handler
+		msg_handler();
 
-		write(1, "\n", 1);
+		// Do something for ~4ms @20MHz
+		for(volatile int i=0; i<10000; i++){;}
 
-		char * tk1 = strtok (cmd_line, " ");
-		char * tk2 = strtok (NULL, " ");
-		char * tk3 = strtok (NULL, " ");
-
-		if (tk1 != NULL && strcmp(tk1, "load")==0){
-			if (tk2 != NULL){
-				uint8_t data = 0x00;
-				const uint64_t addr = strtoull(tk2, NULL, 16);
-				asm ("lbu %0, (%1)" : "+r"(data) : "r"(addr));
-				printf("0x%08x : 0x%02x \n", (unsigned int)addr, data);
-			} else printf("Syntax: load address \n");
-
-		} else if (tk1 != NULL && strcmp(tk1, "store")==0){
-			if (tk2 != NULL && tk3 != NULL){
-				const uint32_t data = (uint32_t)strtoul(tk3, NULL, 16);
-				const uint64_t addr = strtoull(tk2, NULL, 16);
-
-				if ( strlen(tk3) <=2 )
-					asm ( "sb %0, (%1)" : : "r"(data), "r"(addr));
-				else if ( strlen(tk3) <=4 )
-					asm ( "sh %0, (%1)" : : "r"(data), "r"(addr));
-				else
-					asm ( "sw %0, (%1)" : : "r"(data), "r"(addr));
-
-				printf("0x%08x : 0x%02x \n", (unsigned int)addr, (unsigned int)data);
-			} else printf("Syntax: store address data \n");
-
-		} else if (tk1 != NULL && strcmp(tk1, "exec")==0){
-			if (tk2 != NULL){
-				const uint64_t addr = strtoull(tk2, NULL, 16);
-			    asm ( "jr (%0)" : : "r"(addr));
-		} else printf("Syntax: exec address \n");
-
-		} else if (tk1 != NULL && strcmp(tk1, "send")==0){
-			if (tk2 != NULL && tk2[0]>='1' && tk2[0]<='4' && tk3 != NULL){
-				for (int i=0; i<MSG_SIZE; i++)
-					msg[i] = i<strlen(tk3) ? (unsigned int)*(tk3+i) : 0x0;
-				if (!ECALL_SEND(tk2[0]-'0', msg))
-					printf("Error: Inbox full.\n");
-			} else printf("Syntax: send {1|2|3|4} message \n");
-
-		} else if (tk1 != NULL && strcmp(tk1, "recv")==0){
-			if (tk2 != NULL && tk2[0]>='1' && tk2[0]<='4'){
-				if (ECALL_RECV(tk2[0]-'0', msg))
-					printf("msg : 0x%08x 0x%08x 0x%08x 0x%08x \n", msg[0], msg[1], msg[2], msg[3]);
-				else
-					printf("Error: Inbox empty.\n");
-			} else printf("Syntax: recv {1|2|3|4} \n");
-
-		} else if (tk1 != NULL && strcmp(tk1, "yield")==0){
-			volatile unsigned long C1 = ECALL_CSRR_MCYCLE();
-			ECALL_YIELD();
-			volatile unsigned long C2 = ECALL_CSRR_MCYCLE();
-			const int TC = (C2-C1)/(CPU_FREQ/1000000);
-			printf( (TC>0 ? "yield : elapsed time %dus \n" : "yield : n/a \n"), TC);
-
-		} else if (tk1 != NULL && strcmp(tk1, "stats")==0){
-			print_stats();
-
-		} else if (tk1 != NULL && strcmp(tk1, "restart")==0){
-			asm ("j _start");
-
-		} else if (tk1 != NULL && strcmp(tk1, "timer")==0){
-			if (tk2 != NULL){
-				const uint64_t ms = abs(strtoull(tk2, NULL, 10));
-				const uint64_t T0 = ECALL_CSRR_MTIME();
-				const uint64_t T1 = T0 + ms*RTC_FREQ/1000;
-				ECALL_CSRW_MTIMECMP(T1);
-				printf("timer set T0=%lu, T1=%lu \n", (unsigned long)(T0*1000/RTC_FREQ),
-													  (unsigned long)(T1*1000/RTC_FREQ) );
-			} else printf("Syntax: timer ms \n");
-
-		} else if (tk1 != NULL && strcmp(tk1, "pmp")==0){
-			print_pmp();
-
-		} else
-			printf("Commands: load store exec send recv yield pmp stats timer restart \n");
-
+		if (buffer_empty() && inbox_empty())
+			MZONE_WFI();
+		else
+			MZONE_YIELD();
 	}
 
 }
+
+

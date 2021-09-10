@@ -1,4 +1,4 @@
-/* Copyright(C) 2018 Hex Five Security, Inc. - All Rights Reserved */
+/* Copyright(C) 2020 Hex Five Security, Inc. - All Rights Reserved */
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 
 #include <platform.h>
+
+/* https://www.embecosm.com/appnotes/ean9/ean9-howto-newlib-1.0.html */
 
 // ----------------------------------------------------------------------------
 int _close(int file) {
@@ -73,7 +75,7 @@ int _open(const char* name, int flags, int mode) {
 
 	  // Step 2 Set the Line Control Register
 
-	 	 // 1. Disable the parity: Set PEN = 0;
+	 	// 1. Disable the parity: Set PEN = 0;
 		UART_REG(UART_LCR) &= ~(UART_LCR_PEN);
 
 		// 2. Set STOP bits to 1: Set STB = 0;
@@ -84,6 +86,9 @@ int _open(const char* name, int flags, int mode) {
 
 	  // Step 3 Set FIFOE in the FIFO Control Register to enable the FIFO.
 		UART_REG(UART_FIFOCR) |= UART_FIFOCR_FIFOE;
+
+	  // Enable RX interrupt
+		UART_REG(UART_IE) |= UART_IE_ERBI;
 
 		return 0;
 
@@ -98,7 +103,7 @@ int _read(int file, char *ptr, size_t len) {
 
 	if (isatty(file)) {
 
-		ssize_t count = 0;
+		size_t count = 0;
 
 		while( count<len && (UART_REG(UART_LSR) & UART_LSR_DR)){
 
@@ -137,6 +142,22 @@ size_t _write(int file, const void *ptr, size_t len) {
 	}
 
 	return -1;
+}
+
+// ----------------------------------------------------------------------------
+int _kill (int  pid, int  sig) {
+// ----------------------------------------------------------------------------
+
+	return -1;
+
+}
+
+// ----------------------------------------------------------------------------
+int _getpid () {
+// ----------------------------------------------------------------------------
+
+	return  1;
+
 }
 
 // open("UART", 0, 0); write(1, "Ok >\n", 5); char c='\0'; while(1) if ( read(0, &c, 1) >0 ) write(1, &c, 1);

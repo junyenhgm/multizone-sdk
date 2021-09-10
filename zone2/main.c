@@ -1,87 +1,139 @@
-/* Copyright(C) 2018 Hex Five Security, Inc. - All Rights Reserved */
+/* Copyright(C) 2020 Hex Five Security, Inc. - All Rights Reserved */
 
-#include <platform.h>
-#include <libhexfive.h>
+#include <string.h>
 
-#define LED1 5
-#define LED2 6
-#define LED3 7
-#define LED4 8
+#include "platform.h"
+#include "multizone.h"
 
-#define BTN1 1
-#define BTN2 2
-#define BTN3 3
-#define BTN4 4
 
 static volatile int led = LED1;
+static volatile char msg[16] = {'\0'};
 
-void irq_25_handler(void)__attribute__((interrupt("user")));
-void irq_25_handler(void){ // CLIC nt_src[7] GPIO
+__attribute__((interrupt())) void trp_handler(void)	 { // trap handler (0)
+
+	const unsigned long mcause = MZONE_CSRR(CSR_MCAUSE);
+
+	switch (mcause) {
+	case 0:	break; // Instruction address misaligned
+	case 1:	break; // Instruction access fault
+	case 3:	break; // Breakpoint
+	case 4:	break; // Load address misaligned
+	case 5:	break; // Load access fault
+	case 6:	break; // Store/AMO address misaligned
+	case 7:	break; // Store access fault
+	case 8:	break; // Environment call from U-mode
+	}
+
+	for( ;; );
+
+}
+__attribute__((interrupt())) void msi_handler(void)  { // machine software interrupt (3)
+
+	char const tmp[16];
+
+	if (MZONE_RECV(1, tmp))
+		memcpy((char *)msg, tmp, sizeof msg);
+
+}
+__attribute__((interrupt())) void tmr_handler(void)  { // machine timer interrupt (7)
+
+	// togle led
+	GPIO_REG(GPIO_OUTPUT_VAL) ^= led;
+
+	// set timer (clears mip)
+	MZONE_ADTIMECMP((uint64_t)(RTC_FREQ/1000*1000));
+
+}
+__attribute__((interrupt())) void gpio_handler(void) { // local interrupt (25)
 
 	// GPIO: read int
 	const uint32_t gpio_int = GPIO_REG(GPIO_INT_STATUS);
 
-	// Change LED
-	GPIO_REG(GPIO_OUTPUT_VAL) &= ~((0x1 << LED1) | (0x1 << LED2) | (0x1 << LED3) | (0x1 << LED4));
+	// Switch LED based on button pressed
+	GPIO_REG(GPIO_OUTPUT_VAL) &= ~(LED1 | LED2 | LED3 | LED4);
 	switch (gpio_int) {
-		case 1<<BTN1: led = LED1; ECALL_SEND(1, (int[4]){201,0,0,0}); break;
-		case 1<<BTN2: led = LED2; ECALL_SEND(1, (int[4]){202,0,0,0}); break;
-		case 1<<BTN3: led = LED3; ECALL_SEND(1, (int[4]){203,0,0,0}); break;
-		case 1<<BTN4: led = LED4; ECALL_SEND(1, (int[4]){204,0,0,0}); break;
+		case BTN1: led = LED1; MZONE_SEND(1, (char [16]){"IRQ 25 BTN 1"}); break;
+		case BTN2: led = LED2; MZONE_SEND(1, (char [16]){"IRQ 25 BTN 2"}); break;
+		case BTN3: led = LED3; MZONE_SEND(1, (char [16]){"IRQ 25 BTN 3"}); break;
+		case BTN4: led = LED4; MZONE_SEND(1, (char [16]){"IRQ 25 BTN 4"}); break;
 	}
 
 	// GPIO: clear int
 	GPIO_REG(GPIO_INT_STATUS) = gpio_int;
-
-}
-
-void irq_25_init(){
-
-	// GPIO: enable interrupts
-	GPIO_REG(GPIO_INT_EN) |= ( (0x1 << BTN1) | (0x1 << BTN2) | (0x1 << BTN3) | (0x1 << BTN4));
-
-	// GPIO: clear all interrupts
-	GPIO_REG(GPIO_INT_STATUS) = 0xFFFFFFFF;
-
-	// GPIO: set trigger mode to 0x5: Negative-edge
-	GPIO_REG(GPIO_INT_MODE) |= (0x5<<4 | 0x5<<8 | 0x5<<12 | 0x5<<16);
-
-	// GPIO: debounce
-	GPIO_REG(GPIO_DEBOUNCE_EN) |= ( (0x1 << BTN1) | (0x1 << BTN2) | (0x1 << BTN3) );
-	GPIO_REG(GPIO_DEBOUNCE_CTRL) = 0xFF, // 30us x (256+1) = 7.710ms
-
-	// MultiZone: register irq handler (CLIC 25)
-    ECALL_IRQ_VECT(25, irq_25_handler);
-
 }
 
 int main (void){
 
-	GPIO_REG(GPIO_OUTPUT_EN) |= ( (0x1 << LED1) | (0x1 << LED2) | (0x1 << LED3) | (0x1 << LED4));
+	//while(1) MZONE_WFI();
+	//while(1) MZONE_YIELD();
+	//while(1);
 
-	irq_25_init();
+	// vectored trap handler
+	static void (*trap_vect[32])(void) = {};
+	trap_vect[0] = trp_handler;
+	trap_vect[3] = msi_handler;
+	trap_vect[7] = tmr_handler;
+	trap_vect[25] = gpio_handler;
+	CSRW(mtvec, trap_vect);
+	CSRS(mtvec, 0x1);
+
+	// GPIO: enable interrupts
+	GPIO_REG(GPIO_INT_STATUS) = 0xFFFFFFFF;
+	GPIO_REG(GPIO_INT_EN) |= ( BTN1 | BTN2 | BTN3 | BTN4 );
+
+	// GPIO: set trigger mode to Negative-edge 0x5
+	GPIO_REG(GPIO_INT_MODE) |= (0x5<<4 | 0x5<<8 | 0x5<<12 | 0x5<<16);
+
+	// GPIO: set debounce
+	GPIO_REG(GPIO_DEBOUNCE_EN) |= ( BTN1 | BTN2 | BTN3 | BTN4 );
+	GPIO_REG(GPIO_DEBOUNCE_CTRL) = 0xFF; // 30us x (256+1) = 7.710ms
+
+	// GPIO: enable LED outputs
+	GPIO_REG(GPIO_OUTPUT_EN) |= ( LED1 | LED2 | LED3 | LED4);
+
+	// GPIO: enable local interrupt
+	CLIC_REG(CLIC_INT_PENDING+(CLIC_SRC_GPIO<<CLIC_SHIFT_PER_SRC)) |= 0x100;
+
+    // enable and set timer
+	MZONE_ADTIMECMP((uint64_t)(RTC_FREQ/1000*1000));
+	CSRS(mie, 1<<7);
+
+    // enable msip/inbox interrupt
+	CSRS(mie, 1<<3);
+
+	// enable global interrupts
+	CSRS(mstatus, 1<<3);
 
 	while(1){
 
-		GPIO_REG(GPIO_OUTPUT_VAL) ^= (0x1 << led);
+		// Message handler
+		CSRC(mie, 1<<3);
 
-		const uint64_t timeout = ECALL_CSRR_MTIME() + RTC_FREQ*50/100;
+			if (msg[0] != '\0'){
 
-		while (ECALL_CSRR_MTIME() < timeout){
+				if (strncmp("ping", (char *)msg, sizeof msg[0]) == 0)
+					MZONE_SEND(1, (char[16]){"pong"});
+				else if (strcmp("mie=0", (char *)msg) == 0)
+					CSRC(mstatus, 1 << 3);
+				else if (strcmp("mie=1", (char *)msg) == 0)
+					CSRS(mstatus, 1 << 3);
+				else if (strcmp("block", (char *)msg) == 0) {
+					CSRC(mstatus, 1 << 3);
+					for ( ;; );
+				} else
+					MZONE_SEND(1, msg);
 
-			int msg[4]={0,0,0,0};
+				msg[0] = '\0';
 
-			if (ECALL_RECV(1, msg)) {
-				switch (msg[0]) {
-					// case '1': ECALL_CSRS_MIE();	break;
-					// case '0': ECALL_CSRC_MIE();	break;
-					case 'p': ECALL_SEND(1, (int[4] ) {'p','o','n','g'}); break;
-				}
 			}
 
-			ECALL_YIELD();
+		CSRS(mie, 1<<3);
 
-		}
+		// Test workload ~4ms @20MHz
+		for(volatile int i=0; i<10000; i++){;}
+
+		// Wait For Interrupt
+		MZONE_WFI();
 
 	}
 

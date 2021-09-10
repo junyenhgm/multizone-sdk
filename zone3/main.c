@@ -1,21 +1,20 @@
-/* Copyright(C) 2018 Hex Five Security, Inc. - All Rights Reserved */
+/* Copyright(C) 2020 Hex Five Security, Inc. - All Rights Reserved */
 
-#include <stdint.h>
-#include <stdbool.h>
+#include <string.h>	// strcmp()
 
-#include <platform.h>
-#include <libhexfive.h>
-#include "owi_task.h"
+#include "platform.h"
+#include "multizone.h"
+#include "owi_sequence.h"
 
-#define SPI_TDO 19	// IO3 J7.5 PINMUX CTRL1[7:6] = 0
-#define SPI_TCK 20	// IO4 J7.4 PINMUX CTRL1[9:8] = 0
 #define SPI_TDI 21 	// IO5 J7.3 PINMUX CTRL1[11:10] = 0
+#define SPI_TCK 20	// IO4 J7.4 PINMUX CTRL1[9:8] = 0
+#define SPI_TDO 19	// IO3 J7.5 PINMUX CTRL1[7:6] = 0
 
-#define LED_RED		8	// LED4 (green)
-#define LED_GREEN	8	// LED4 (green)
-#define LED_BLUE	8	// LED4 (green)
+#define MAN_CMD_TIME RTC_FREQ/1000*250 // 250ms
+#define KEEP_ALIVE_TIME RTC_FREQ/1000*1000 // 1 sec
+#define LED_TIME RTC_FREQ/1000*20 //  20ms
 
-uint8_t CRC8(uint8_t bytes[]){
+static uint8_t CRC8(const uint8_t bytes[]){
 
     const uint8_t generator = 0x1D;
     uint8_t crc = 0;
@@ -33,158 +32,204 @@ uint8_t CRC8(uint8_t bytes[]){
 
     return crc;
 }
+static uint32_t spi_rw(const uint32_t cmd){
 
-uint32_t spi_rw(uint8_t cmd[]){
+	const uint8_t bytes[] = {(uint8_t)cmd, (uint8_t)(cmd>>8), (uint8_t)(cmd>>16)};
+	const uint32_t tx_data = bytes[0]<<24 | bytes[1]<<16 | bytes[2]<<8 | CRC8(bytes);
 
 	uint32_t rx_data = 0;
-
-	const uint32_t tx_data = ((uint8_t)cmd[0] << 24) |  ((uint8_t)cmd[1] << 16) | ((uint8_t)cmd[2] << 8) | CRC8(cmd);
 
 	for (int i=32-1, bit; i>=0; i--){
 
 		bit = (tx_data >> i) & 1U;
-		GPIO_REG(GPIO_OUTPUT_VAL) = (bit==1 ? GPIO_REG(GPIO_OUTPUT_VAL) | (0x1 << SPI_TDO) :
-											  GPIO_REG(GPIO_OUTPUT_VAL) & ~(0x1 << SPI_TDO)  );
+		GPIO_REG(GPIO_OUTPUT_VAL) = (bit==1 ? GPIO_REG(GPIO_OUTPUT_VAL) | (1 << SPI_TDO) :
+											  GPIO_REG(GPIO_OUTPUT_VAL) & ~(1 << SPI_TDO)  );
 
-		GPIO_REG(GPIO_OUTPUT_VAL) |= (0x1 << SPI_TCK); volatile int w1=0; while(w1<5) w1++;
-		GPIO_REG(GPIO_OUTPUT_VAL) ^= (0x1 << SPI_TCK); volatile int w2=0; while(w2<5) w2++;
+		GPIO_REG(GPIO_OUTPUT_VAL) |= (1 << SPI_TCK); //volatile int w1=10; while(w1--);
+		GPIO_REG(GPIO_OUTPUT_VAL) ^= (1 << SPI_TCK); //volatile int w2=10; while(w2--);
 		bit = ( GPIO_REG(GPIO_INPUT_VAL) >> SPI_TDI) & 1U;
-		rx_data = ( bit==1 ? rx_data |  (0x1 << i) : rx_data & ~(0x1 << i) );
+		rx_data = ( bit==1 ? rx_data |  (1 << i) : rx_data & ~(1 << i) );
 
 	}
 
 	return rx_data;
 }
 
-int main (void){
+#define CMD_DUMMY 0xFFFFFF
+#define CMD_STOP  0x000000
 
-	//volatile int w=0; while(1){w++;}
-	//while(1) ECALL_YIELD();
+static volatile uint32_t usb_state = 0;
+static volatile uint32_t man_cmd = CMD_STOP;
+static volatile char msg[16] = {'\0'};
 
-	// AndesCore_N22_DS154_V1.3 Table 116: Pin Assignment of GPIO Signals - Corvette-F1
-	//SMU_REG(SMU_PINMUX_CTRL1) |= ((0 <<6) | (0<<8) | 0<<10);
+uint64_t task0(); // OWI Sequence
+uint64_t task1(); // Manual cmd stop
+uint64_t task2(); // Keep alive
 
-	GPIO_REG(GPIO_OUTPUT_EN) |= ((0x1 << SPI_TCK) | (0x1<< SPI_TDO));
+static struct {
+	uint64_t (*task)(void);
+	uint64_t timecmp;
+} timer[] = {{task0, UINT64_MAX}, {task1, UINT64_MAX}, {task2, UINT64_MAX}};
 
-	#define CMD_STOP  ((uint8_t[]){0x00, 0x00, 0x00})
-	#define CMD_DUMMY ((uint8_t[]){0xFF, 0xFF, 0xFF})
-	#define CMD_TIME  RTC_FREQ*25/100 	//  250ms
-	#define PING_TIME RTC_FREQ 			// 1000ms
-	#define SYS_TIME  RTC_REG(RTC_MTIME)
-	#define LED_ON_TIME  RTC_FREQ*2/100 //  50ms
-	#define LED_OFF_TIME RTC_FREQ 		// 950ms
+void timer_set(const int i, const uint64_t timecmp){
 
+	timer[i].timecmp = timecmp;
 
-	uint64_t cmd_timer=0, ping_timer=0, led_timer=0;
-	uint32_t rx_data = 0, usb_state = 0;
-	int LED = LED_RED;
+	uint64_t timecmp_min = UINT64_MAX;
+	for (int i=0; i<sizeof(timer)/sizeof(timer[0]); i++)
+		timecmp_min = timer[i].timecmp < timecmp_min ? timer[i].timecmp : timecmp_min;
 
-	while(1){
+	MZONE_WRTIMECMP(timecmp_min);
 
-		int msg[4]={0,0,0,0};
+}
+void timer_handler(const uint64_t time){
 
-		if (ECALL_RECV(1, msg)) {
+	for (int i=0; i<sizeof(timer)/sizeof(timer[0]); i++)
+		if(time >= timer[i].timecmp){
+			timer_set(i, timer[i].task());
+			break;
+		}
+}
 
-			if (msg[0] && !msg[1] && usb_state==0x12670000 && cmd_timer==0){
+uint64_t task0(){ // OWI sequence
 
-				uint8_t cmd[3] = {0x00, 0x00, 0x00};
+	uint64_t timecmp = UINT64_MAX;
 
-				switch (msg[0]){
-					case 'q' : cmd[0] = 0x01; break; // grip close
-					case 'a' : cmd[0] = 0x02; break; // grip open
-					case 'w' : cmd[0] = 0x04; break; // wrist up
-					case 's' : cmd[0] = 0x08; break; // wrist down
-					case 'e' : cmd[0] = 0x10; break; // elbow up
-					case 'd' : cmd[0] = 0x20; break; // elbow down
-					case 'r' : cmd[0] = 0x40; break; // shoulder up
-					case 'f' : cmd[0] = 0x80; break; // shoulder down
-					case 't' : cmd[1] = 0x01; break; // base clockwise
-					case 'g' : cmd[1] = 0x02; break; // base counterclockwise
-					case 'y' : cmd[2] = 0x01; break; // light on
-					default  : break;
-				}
+	if (usb_state==0x12670000){
 
-				if ( cmd[0] + cmd[1] + cmd[2] != 0 ){
-					rx_data = spi_rw(cmd);
-					cmd_timer = SYS_TIME + CMD_TIME;
-					ping_timer = SYS_TIME + PING_TIME;
-				}
-			}
-
-			// Ping Pong & Change LED color
-			if (msg[0]=='p' && msg[1]=='i' && msg[2]=='n' && msg[3]=='g') ECALL_SEND(1, msg);
-
+		if (owi_sequence_next()!=-1){
+			spi_rw(owi_sequence_get_cmd());
+			timecmp = MZONE_RDTIME() + owi_sequence_get_ms()*RTC_FREQ/1000;
 		}
 
-		// auto stop manual commands after CMD_TIME
-	    if (cmd_timer >0 && SYS_TIME > cmd_timer){
-	    	rx_data = spi_rw(CMD_STOP);
-	    	cmd_timer=0;
-	    	ping_timer = SYS_TIME + PING_TIME;
-	    }
+	}
 
-	    // Detect USB state every 1sec
-	    if (SYS_TIME > ping_timer){
-	    	rx_data = spi_rw(CMD_DUMMY);
-	    	ping_timer = SYS_TIME + PING_TIME;
-	    }
+	return timecmp;
 
-	    // Update USB state (0xFFFFFFFF no spi/usb adapter)
-	    if (rx_data != usb_state){
+}
+uint64_t task1(){ // Manual cmd stop
+	spi_rw(man_cmd = CMD_STOP);
+	return UINT64_MAX;
+}
+uint64_t task2(){ // Keep alive 1sec
 
-	    	if (rx_data==0x12670000 && usb_state==0x0){
-	    		LED = LED_GREEN;
-	    		ECALL_SEND(1, ((int[]){1,0,0,0}));
-	    	} else if (rx_data==0x0 && usb_state==0x12670000){
-	    		LED = LED_RED;
-	    		ECALL_SEND(1, ((int[]){2,0,0,0}));
-	    		owi_task_stop_request();
-	    	}
+	// Send keep alive packet and check ret value
+	volatile uint32_t rx_data = spi_rw(CMD_DUMMY);
 
-	    	usb_state=rx_data;
-	    }
+    // Update USB state (0xFFFFFFFF no spi/usb adapter)
+    if (rx_data != usb_state){
+    	if (rx_data==0x12670000){
+    		MZONE_SEND(1, (char [16]){"USB ID 12670000"});
+    	} else if (usb_state==0x12670000){
+    		MZONE_SEND(1, (char [16]){"USB DISCONNECT"});
+    		owi_sequence_stop();
+    	}
+    	usb_state=rx_data;
+    }
 
-		// OWI sequence
-	    if (usb_state==0x12670000){
+	const uint64_t time = MZONE_RDTIME();
 
-	    	switch (msg[0]){
-				case '<' : owi_task_fold(); break;
-				case '>' : owi_task_unfold(); break;
-				case '1' : owi_task_start_request(); break;
-				case '0' : owi_task_stop_request(); break;
-	    	}
+	return time + KEEP_ALIVE_TIME;
+}
 
-			int32_t cmd = owi_task_run(SYS_TIME);
-			if ( cmd != -1){
-				rx_data = spi_rw((uint8_t[]){(uint8_t)cmd, (uint8_t)(cmd>>8), (uint8_t)(cmd>>16)});
-				ping_timer = SYS_TIME + PING_TIME;
+__attribute__(( interrupt())) void trap_handler(void){
+
+	#define IRQ (1UL << (__riscv_xlen-1))
+
+	switch(MZONE_CSRR(CSR_MCAUSE) & (IRQ | 0xFFFUL)){ // safe way to read mcause as CLIC adds extra info
+		case 0 : break; // Instruction address misaligned
+		case 1 : break; // Instruction access fault
+		case 3 : break; // Breakpoint
+		case 4 : break; // Load address misaligned
+		case 5 : break; // Load access fault
+		case 6 : break; // Store/AMO address misaligned
+		case 7 : break; // Store access fault
+		case 8 : break; // Environment call from U-mode
+
+		case IRQ | 3 :  // Software interrupt (inbox)
+			;char const tmp[16];
+			if (MZONE_RECV(1, tmp))
+				memcpy((char *)msg, tmp, sizeof msg);
+			return;
+
+		case IRQ | 7 :  // Muliplexed timer
+			timer_handler(MZONE_RDTIME());
+			return;
+
+	}
+
+	for( ;; );
+
+}
+
+void msg_handler(const char *msg){
+
+	if (strcmp("ping", msg)==0){
+		MZONE_SEND(1, (char [16]){"pong"});
+
+	} else if (usb_state==0x12670000 && man_cmd==CMD_STOP){
+
+		if (strcmp("stop", msg)==0) owi_sequence_stop_req();
+
+		else if (!owi_sequence_is_running()){
+
+			     if (strcmp("start", msg)==0) {owi_sequence_start(MAIN);   timer_set(0, 0);}
+			else if (strcmp("fold",  msg)==0) {owi_sequence_start(FOLD);   timer_set(0, 0);}
+			else if (strcmp("unfold",msg)==0) {owi_sequence_start(UNFOLD); timer_set(0, 0);}
+
+			// Manual single-command adjustments
+				 if (strcmp("q", msg)==0) man_cmd = 0x000001; // grip close
+			else if (strcmp("a", msg)==0) man_cmd = 0x000002; // grip open
+			else if (strcmp("w", msg)==0) man_cmd = 0x000004; // wrist up
+			else if (strcmp("s", msg)==0) man_cmd = 0x000008; // wrist down
+			else if (strcmp("e", msg)==0) man_cmd = 0x000010; // elbow up
+			else if (strcmp("d", msg)==0) man_cmd = 0x000020; // elbow down
+			else if (strcmp("r", msg)==0) man_cmd = 0x000040; // shoulder up
+			else if (strcmp("f", msg)==0) man_cmd = 0x000080; // shoulder down
+			else if (strcmp("t", msg)==0) man_cmd = 0x000100; // base clockwise
+			else if (strcmp("g", msg)==0) man_cmd = 0x000200; // base counterclockwise
+			else if (strcmp("y", msg)==0) man_cmd = 0x010000; // light on
+
+			if (man_cmd != CMD_STOP){
+				spi_rw(man_cmd);
+				timer_set(1, MZONE_RDTIME() + MAN_CMD_TIME);
 			}
 
-	    }
-
-        // LED blink
-	    if (SYS_TIME > led_timer){
-
-	    	if ( GPIO_REG(GPIO_OUTPUT_VAL) & (LED_RED | LED_GREEN | LED_BLUE) ) {
-	    		// ON => OFF
-	        	GPIO_REG(GPIO_OUTPUT_VAL) &= ~(LED_RED | LED_GREEN | LED_BLUE);
-	    		led_timer = SYS_TIME + LED_OFF_TIME;
-
-	    	} else {
-	    		// OFF => ON
-	        	GPIO_REG(GPIO_OUTPUT_VAL) &= ~(LED_RED | LED_GREEN | LED_BLUE);
-	    		GPIO_REG(GPIO_OUTPUT_VAL) |= LED;
-	    		led_timer = SYS_TIME + LED_ON_TIME;
-	    	}
-
-	    }
-
-	    // Yield to other zones
-		ECALL_YIELD();
+		}
 
 	}
 
 }
 
+int main (void){
 
+	//while(1) MZONE_WFI();
+	//while(1) MZONE_YIELD();
+	//while(1);
 
+	GPIO_REG(GPIO_OUTPUT_EN) |= ((0x1 << SPI_TCK) | (0x1<< SPI_TDO));
+
+	CSRW(mtvec, trap_handler);  // register trap handler
+	CSRS(mie, 1<<3);    		// enable msip/inbox interrupt
+	CSRS(mie, 1<<7); 			// enable timer interrupts
+    CSRS(mstatus, 1<<3);		// enable global interrupts
+
+    // Start task2: Hartbeat LED, USB status, Keep alive pkt
+    timer_set(2, 0);
+
+	while(1){
+
+		// Message handler
+		CSRC(mie, 1 << 3);
+			if (msg[0] != '\0') {
+				msg_handler((const char *)msg);
+				msg[0] = '\0';
+			}
+		CSRS(mie, 1 << 3);
+
+		// wait for next message
+	    MZONE_WFI();
+
+	}
+
+}

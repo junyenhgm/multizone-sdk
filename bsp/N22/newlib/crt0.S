@@ -1,4 +1,4 @@
-/* Copyright(C) 2018 Hex Five Security, Inc. - All Rights Reserved */
+/* Copyright(C) 2020 Hex Five Security, Inc. - All Rights Reserved */
 
 	.section .init
 	.globl _start
@@ -28,7 +28,7 @@ _start:
 
 	/* Clear bss section */
 	la a0, __bss_start
-	la a1, _end
+	la a1, __bss_end
 	bgeu a0, a1, 2f
 1:
 	sw zero, (a0)
@@ -36,10 +36,11 @@ _start:
 	bltu a0, a1, 1b
 2:
 
+
 	/* Call global constructors */
 	la a0, __libc_fini_array
 	call atexit
-	call __libc_init_array
+    call    __libc_init_array
 
 	auipc ra, 0
 	addi sp, sp, -16
@@ -64,15 +65,3 @@ _init: ret
   	.type   _fini, @function
 _fini: ret
   	.size  _fini, .-_fini
-
-/*  .global _init
-  .type   _init, @function
-  .global _fini
-  .type   _fini, @function
-_init:
-_fini:
-  # These don't have to do anything since we use init_array/fini_array.
-  ret
-  .size  _init, .-_init
-  .size  _fini, .-_fini
-*/

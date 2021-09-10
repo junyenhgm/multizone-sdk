@@ -1,43 +1,22 @@
-# Copyright(C) 2018 Hex Five Security, Inc. - All Rights Reserved
-
+# Copyright(C) 2020 Hex Five Security, Inc. - All Rights Reserved
 
 #############################################################
 # Platform definitions
 #############################################################
 
-BOARD ?= E31
-ifeq ($(BOARD),E21)
-	ARCH := rv32
-	RISCV_ARCH := $(ARCH)imac
-	RISCV_ABI := ilp32
-else ifeq ($(BOARD),E31)
-	ARCH := rv32
-	RISCV_ARCH := $(ARCH)imac
-	RISCV_ABI := ilp32	
-else ifeq ($(BOARD),E51)
-	ARCH := rv64
-	RISCV_ARCH := $(ARCH)imac
-	RISCV_ABI := lp64
-else ifeq ($(BOARD),S51)
-	ARCH := rv64
-	RISCV_ARCH := $(ARCH)imac
-	RISCV_ABI := lp64
-else ifeq ($(BOARD),X300)
-	ARCH := rv32
-	RISCV_ARCH := $(ARCH)imac
-	RISCV_ABI := ilp32
-else ifeq ($(BOARD),E902)
-	ARCH := rv32
-	RISCV_ARCH := $(ARCH)emac
-	RISCV_ABI := ilp32e
-else ifeq ($(BOARD),N22)
-	ARCH := rv32
-	RISCV_ARCH := $(ARCH)imac
-	RISCV_ABI := ilp32	
-else
-	$(error Unsupported board $(BOARD))
-endif
+BOARD ?= X300
 
+ifeq ($(filter $(BOARD), X300 E31 FE310 N22), $(BOARD))
+    ARCH := rv32
+    RISCV_ARCH := $(ARCH)imac
+    RISCV_ABI := ilp32
+else ifeq ($(filter $(BOARD), S51), $(BOARD))
+    ARCH := rv64
+    RISCV_ARCH := $(ARCH)imac
+    RISCV_ABI := lp64
+else
+    $(error Unsupported board $(BOARD))
+endif
 
 #############################################################
 # Arguments/variables available to all submakes
@@ -46,7 +25,6 @@ endif
 export BOARD
 export RISCV_ARCH
 export RISCV_ABI
-
 
 #############################################################
 # Toolchain definitions
@@ -62,7 +40,7 @@ export OBJDUMP := $(CROSS_COMPILE)objdump
 export OBJCOPY := $(CROSS_COMPILE)objcopy
 export GDB     := $(CROSS_COMPILE)gdb
 export AR      := $(CROSS_COMPILE)ar
-
+export SIZE    := $(CROSS_COMPILE)size
 
 #############################################################
 # Rules for building multizone
@@ -70,31 +48,40 @@ export AR      := $(CROSS_COMPILE)ar
 
 .PHONY: all 
 all: clean
+	$(MAKE) -C bsp/$(BOARD)/boot
 	$(MAKE) -C zone1
 	$(MAKE) -C zone2
-	$(MAKE) -C zone3	
-	java -jar multizone.jar --arch=$(BOARD) \
-	   -k ../hexfive-kern/build/N22/kernel.hex \
-	   -c bsp/$(BOARD)/multizone.cfg \
-	   zone1/zone1.hex \
-	   zone2/zone2.hex \
-	   zone3/zone3.hex
+	$(MAKE) -C zone3
+	$(MAKE) -C zone3.1
+	$(MAKE) -C zone4
+
+	java -jar multizone.jar \
+		--arch $(BOARD) \
+		--config bsp/$(BOARD)/multizone.cfg \
+		--boot bsp/$(BOARD)/boot/boot.hex \
+		zone1/zone1.hex \
+		zone2/zone2.hex \
+		zone3.1/zone3.hex \
+		zone4/zone4.hex
+
 	$(OBJCOPY) -S -Iihex -Obinary multizone.hex multizone.bin
 
 .PHONY: clean
 clean: 
 	$(MAKE) -C zone1 clean
 	$(MAKE) -C zone2 clean
-	$(MAKE) -C zone3 clean		
-	rm -f *.hex *.bin *.lst *.map
-
+	$(MAKE) -C zone3 clean
+	$(MAKE) -C zone3.1 clean
+	$(MAKE) -C zone4 clean
+	$(MAKE) -C bsp/$(BOARD)/boot clean
+	rm -f multizone.hex multizone.bin
 
 #############################################################
-# Load and debug variables and rules
+# Load to flash
 #############################################################
 
 ifndef OPENOCD
-$(error OPENOCD not set)
+    $(error OPENOCD not set)
 endif
 
 OPENOCD := $(abspath $(OPENOCD))/bin/openocd
@@ -108,8 +95,7 @@ GDB_LOAD_CMDS += -ex "set mem inaccessible-by-default off"
 GDB_LOAD_CMDS += -ex "set remotetimeout 240"
 GDB_LOAD_CMDS += -ex "set arch riscv:$(ARCH)"
 GDB_LOAD_CMDS += -ex "target extended-remote localhost:$(GDB_PORT)"
-GDB_LOAD_CMDS += -ex "monitor reset halt"
-GDB_LOAD_CMDS += -ex "monitor flash protect 0 64 last off"
+GDB_LOAD_CMDS += -ex "monitor reset init"
 GDB_LOAD_CMDS += -ex "load"
 GDB_LOAD_CMDS += -ex "monitor resume"
 GDB_LOAD_CMDS += -ex "monitor shutdown"
@@ -117,7 +103,15 @@ GDB_LOAD_CMDS += -ex "quit"
 
 .PHONY: load
 
+ifeq ($(BOARD),FE310)
+
+load:
+	printf "loadfile multizone.hex\nrnh\nexit\n" | JLinkExe -device FE310 -if JTAG -speed 4000 -jtagconf -1,-1 -autoconnect 1
+
+else
+
 load:
 	$(OPENOCD) $(OPENOCDARGS) & \
 	$(GDB) multizone.hex $(GDB_LOAD_ARGS) $(GDB_LOAD_CMDS)
-	
+
+endif
