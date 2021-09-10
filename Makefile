@@ -4,7 +4,7 @@
 # Platform definitions
 #############################################################
 
-BOARD ?= X300
+BOARD ?= N22
 
 ifeq ($(filter $(BOARD), X300 E31 FE310 N22), $(BOARD))
     ARCH := rv32

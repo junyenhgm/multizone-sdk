@@ -69,9 +69,18 @@ index 8a53c07bb..daa4be3fd 100644
  
  
 diff --git a/portable/GCC/RISC-V/portASM.S b/portable/GCC/RISC-V/portASM.S
-index 3aaa89baf..888bd87f2 100644
+index 3aaa89baf..c199c4897 100644
 --- a/portable/GCC/RISC-V/portASM.S
 +++ b/portable/GCC/RISC-V/portASM.S
+@@ -116,7 +116,7 @@ at the top of this file. */
+ 
+ /*-----------------------------------------------------------*/
+ 
+-.align 8
++.align 2
+ .func
+ freertos_risc_v_trap_handler:
+ 	addi sp, sp, -portCONTEXT_SIZE
 @@ -186,9 +186,17 @@ handle_asynchronous:
  			li t4, -1
  			lw t2, 0(t1)				/* Load the low word of ullNextTime into t2. */
@@ -117,6 +126,24 @@ index 3aaa89baf..888bd87f2 100644
 +1:	load_x sp, xISRStackTop				/* Switch to ISR stack before function call. */
  	jal portasmHANDLE_INTERRUPT			/* Jump to the interrupt handler if there is no CLINT or if there is a CLINT and it has been determined that an external interrupt is pending. */
  	j processed_source
+ 
+@@ -294,7 +308,7 @@ processed_source:
+ 	.endfunc
+ /*-----------------------------------------------------------*/
+ 
+-.align 8
++.align 2
+ .func
+ xPortStartFirstTask:
+ 
+@@ -412,7 +426,7 @@ xPortStartFirstTask:
+  * [chip specific registers go here]
+  * pxCode
+  */
+-.align 8
++.align 2
+ .func
+ pxPortInitialiseStack:
  
 diff --git a/portable/GCC/RISC-V/portmacro.h b/portable/GCC/RISC-V/portmacro.h
 index a8eff23b9..6385afbeb 100644
