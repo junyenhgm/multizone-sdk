@@ -4,9 +4,9 @@
 # Platform definitions
 #############################################################
 
-BOARD ?= N22
+BOARD ?= N22-ILM
 
-ifeq ($(filter $(BOARD), X300 E31 FE310 N22), $(BOARD))
+ifeq ($(filter $(BOARD), X300 E31 FE310 N22-ILM N22-FLASH), $(BOARD))
     ARCH := rv32
     RISCV_ARCH := $(ARCH)imac
     RISCV_ABI := ilp32
@@ -64,7 +64,7 @@ all: clean
 		zone3.1/zone3.hex \
 		zone4/zone4.hex
 
-	$(OBJCOPY) -S -Iihex -Obinary multizone.hex multizone.bin
+	@$(OBJCOPY) -S -Iihex -Obinary multizone.hex multizone.bin
 
 .PHONY: clean
 clean: 

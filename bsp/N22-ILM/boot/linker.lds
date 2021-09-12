@@ -5,8 +5,8 @@ OUTPUT_ARCH( "riscv" )
 ENTRY( boot )
 
 MEMORY {
-  flash (rxai!w) : ORIGIN = flash + 0x2000, LENGTH = 2K
-  prog  (rxai!w) : ORIGIN = itim  + 0x2000, LENGTH = 2K
+  lm (rxai!w) : ORIGIN = flash + 0x2000, LENGTH = 2K
+  vm (rxai!w) : ORIGIN = flash + 0x2000, LENGTH = 2K
 }
 
 SECTIONS {
@@ -14,6 +14,6 @@ SECTIONS {
   .boot : ALIGN(32/8)
   {
     KEEP(*(.text.boot)); 
-  } >prog AT>flash
+  } >vm AT>lm
 
 }
