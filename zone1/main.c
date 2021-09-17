@@ -38,7 +38,7 @@ __attribute__(( interrupt())) void trap_handler(void){
 	const unsigned long mepc   = MZONE_CSRR(CSR_MEPC);
 	const unsigned long mtval  = MZONE_CSRR(CSR_MTVAL);
 
-	switch(mcause & (IRQ | 0xFFFUL)){ // safe way to read mcause as CLIC adds extra info
+	switch(mcause){
 
 	case 0 : printf("Instruction address missaligned : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
 			 break;
@@ -78,13 +78,11 @@ __attribute__(( interrupt())) void trap_handler(void){
 			 break;
 
 	case IRQ | 3 :	// Software interrupt msip/inbox
-
 			for (Zone zone = zone1; zone <= zone4; zone++) {
-				char tmp[16];
-				if (MZONE_RECV(zone, tmp))
-					memcpy((char*) &inbox[zone - 1], tmp, sizeof inbox[0]);
+				char msg[16];
+				if (MZONE_RECV(zone, msg))
+					memcpy((char*) &inbox[zone-1][0], msg, sizeof inbox[0]);
 			}
-
 			return;
 
 	case IRQ | 7 :	// Machine timer interrupt (one-shot)
@@ -96,13 +94,12 @@ __attribute__(( interrupt())) void trap_handler(void){
 			return;
 
 	case IRQ | CLIC_SRC_UART :
-			;char tmp[8];
-			int count = read(0, &tmp, sizeof tmp);
+			;char temp[8]; int count = read(0, &temp, 8);
 			if (count > 0){
 				//if(buffer.w==BUFFER_SIZE){write(1, "\n>>> BUFFER FULL !!!\n", 21); while(1);}
 				#define MIN(a,b) (((a)<(b))?(a):(b))
 				count = MIN(count, BUFFER_SIZE - buffer.w);
-				memcpy((char *)&buffer.data[buffer.w], tmp, count);
+				memcpy((char*) &buffer.data[buffer.w], temp, count);
 				buffer.w += count;
 			}
 			return;
@@ -194,7 +191,7 @@ __attribute__(( interrupt())) void trap_handler(void){
 	printf(" \n");
 
 #ifdef PLIC_BASE
-	printf("PLIC @0x%08x \n", (unsigned)CLIC_BASE);
+	printf("PLIC @0x%08x \n", (unsigned)PLIC_BASE);
 #endif
 #ifdef CLIC_BASE
 	printf("CLIC @0x%08x \n", (unsigned)CLIC_BASE);
@@ -428,6 +425,27 @@ void cmd_handler(){
 			asm ( "jr (%0)" : : "r"(addr));
 		} else printf("Syntax: exec address \n");
 
+#ifdef DMA_BASE
+	// --------------------------------------------------------------------
+	} else if (strcmp(tk[0], "dma")==0){
+	// --------------------------------------------------------------------
+		if (tk[1] != NULL && tk[2] != NULL && tk[3] != NULL){
+
+			const uint32_t srcWid = (tk[4] == NULL ? 0 : strtoul(tk[4],NULL,10) & 0b011);
+			const uint32_t dstWid = (tk[5] == NULL ? 0 : strtoul(tk[5],NULL,10) & 0b011);
+			const uint32_t srcCtr = (tk[6] == NULL ? 0 : strtoul(tk[6],NULL,10) & 0b011);
+			const uint32_t dstCtr = (tk[7] == NULL ? 0 : strtoul(tk[7],NULL,10) & 0b011);
+			const uint32_t ch     = (tk[8] == NULL ? 0 : strtoul(tk[8],NULL,10) & 0b111);
+			const uint32_t chCtrl = srcWid<<20 | dstWid<<18 | srcCtr<<14 | dstCtr<<12;
+
+			DMA_REG(DMA_TR_SRC +ch*0x14) = strtoul(tk[1], NULL, 16);
+			DMA_REG(DMA_TR_DEST+ch*0x14) = strtoul(tk[2], NULL, 16);
+			DMA_REG(DMA_TR_SIZE+ch*0x14) = strtoul(tk[3], NULL, 10);
+			DMA_REG(DMA_CH_CTRL+ch*0x14) = chCtrl | (1<<0); // enable ch (start transfer)
+
+		} else printf("Syntax: dma src dst size [srcWidth dstWidth srcAddrCtrl dstAddrCtrl ch] \n");
+#endif
+
 	// --------------------------------------------------------------------
 	} else if (strcmp(tk[0], "send")==0){
 	// --------------------------------------------------------------------
@@ -498,30 +516,9 @@ void cmd_handler(){
 		unsigned long C1 = MZONE_CSRR(CSR_MCYCLE);
 		printf( "0x%08x (%d cycles) \n", (unsigned)regval, (int)(C1-C0) );
 
-#ifdef DMA_BASE
-	// --------------------------------------------------------------------
-	} else if (strcmp(tk[0], "dma")==0){
-	// --------------------------------------------------------------------
-		if (tk[1] != NULL && tk[2] != NULL && tk[3] != NULL){
-
-			const uint32_t srcWid = (tk[4] == NULL ? 0 : strtoul(tk[4],NULL,10) & 0b011);
-			const uint32_t dstWid = (tk[5] == NULL ? 0 : strtoul(tk[5],NULL,10) & 0b011);
-			const uint32_t srcCtr = (tk[6] == NULL ? 0 : strtoul(tk[6],NULL,10) & 0b011);
-			const uint32_t dstCtr = (tk[7] == NULL ? 0 : strtoul(tk[7],NULL,10) & 0b011);
-			const uint32_t ch     = (tk[8] == NULL ? 0 : strtoul(tk[8],NULL,10) & 0b111);
-			const uint32_t chCtrl = srcWid<<20 | dstWid<<18 | srcCtr<<14 | dstCtr<<12;
-
-			DMA_REG(DMA_TR_SRC +ch*0x14) = strtoul(tk[1], NULL, 16);
-			DMA_REG(DMA_TR_DEST+ch*0x14) = strtoul(tk[2], NULL, 16);
-			DMA_REG(DMA_TR_SIZE+ch*0x14) = strtoul(tk[3], NULL, 10);
-			DMA_REG(DMA_CH_CTRL+ch*0x14) = chCtrl | (1<<0); // enable ch (start transfer)
-
-		} else printf("Syntax: dma src dst size [srcWidth dstWidth srcAddrCtrl dstAddrCtrl ch] \n");
-#endif
-
 	} else {
 		printf("Commands: yield send recv pmp load store exec stats timer restart ");
-#ifdef DMA_REG
+#ifdef DMA_BASE
 		printf("dma ");
 #endif
 		printf("\n");

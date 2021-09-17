@@ -38,7 +38,7 @@ __attribute__((interrupt())) void msi_handler(void)  { // machine software inter
 __attribute__((interrupt())) void tmr_handler(void)  { // machine timer interrupt (7)
 
 	// togle led
-	GPIO_REG(GPIO_OUTPUT_VAL) ^= led;
+	BITINV(GPIO_BASE+GPIO_OUTPUT_VAL, led);
 
 	// set timer (clears mip)
 	MZONE_ADTIMECMP((uint64_t)(RTC_FREQ/1000*1000));
@@ -50,7 +50,7 @@ __attribute__((interrupt())) void gpio_handler(void) { // local interrupt (25)
 	const uint32_t gpio_int = GPIO_REG(GPIO_INT_STATUS);
 
 	// Switch LED based on button pressed
-	GPIO_REG(GPIO_OUTPUT_VAL) &= ~(LED1 | LED2 | LED3 | LED4);
+	BITCLR(GPIO_BASE+GPIO_OUTPUT_VAL, LED1 | LED2 | LED3 | LED4);
 	switch (gpio_int) {
 		case BTN1: led = LED1; MZONE_SEND(1, (char [16]){"IRQ 25 BTN 1"}); break;
 		case BTN2: led = LED2; MZONE_SEND(1, (char [16]){"IRQ 25 BTN 2"}); break;
@@ -130,7 +130,7 @@ int main (void){
 		CSRS(mie, 1<<3);
 
 		// Test workload ~4ms @20MHz
-		for(volatile int i=0; i<10000; i++){;}
+		// for(volatile int i=0; i<10000; i++){;}
 
 		// Wait For Interrupt
 		MZONE_WFI();

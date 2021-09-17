@@ -48,20 +48,19 @@ export SIZE    := $(CROSS_COMPILE)size
 
 .PHONY: all 
 all: clean
-	$(MAKE) -C bsp/$(BOARD)/boot
 	$(MAKE) -C zone1
 	$(MAKE) -C zone2
 	$(MAKE) -C zone3
 	$(MAKE) -C zone3.1
 	$(MAKE) -C zone4
-
+	$(MAKE) -C bsp/$(BOARD)/boot
 	java -jar multizone.jar \
 		--arch $(BOARD) \
 		--config bsp/$(BOARD)/multizone.cfg \
 		--boot bsp/$(BOARD)/boot/boot.hex \
 		zone1/zone1.hex \
 		zone2/zone2.hex \
-		zone3.1/zone3.hex \
+		zone3/zone3.hex \
 		zone4/zone4.hex
 
 	@$(OBJCOPY) -S -Iihex -Obinary multizone.hex multizone.bin

@@ -37,7 +37,7 @@ int main (void){
 		}
 
 		// Do something for ~4ms @20MHz
-		for(volatile int i=0; i<10000; i++){;}
+		// for(volatile int i=0; i<10000; i++){;}
 
 		// Suspend waiting for incoming msg
 		MZONE_WFI();
