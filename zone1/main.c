@@ -53,19 +53,19 @@ __attribute__(( interrupt())) void trap_handler(void){
 			 break;
 
 	case 4 : printf("Load address missaligned : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
- 	 	 	 CSRW(mepc, mepc + (*(char *)mepc & (0b11 == 0b11 ? 4 : 2)) ); // skip
+             CSRW(mepc, mepc + (((*(char *)mepc) & 0b11) == 0b11 ? 4 : 2)); // skip faulty instruction
 	 	 	 return;
 
 	case 5 : printf("Load access fault : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
- 	 	 	 CSRW(mepc, mepc+4); // skip
+             CSRW(mepc, mepc + (((*(char *)mepc) & 0b11) == 0b11 ? 4 : 2)); // skip faulty instruction
 	 	 	 return;
 
 	case 6 : printf("Store/AMO address missaligned : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
- 	 	 	 CSRW(mepc, mepc + (*(char *)mepc & (0b11 == 0b11 ? 4 : 2)) ); // skip
+	         CSRW(mepc, mepc + (((*(char *)mepc) & 0b11) == 0b11 ? 4 : 2)); // skip faulty instruction
 	 	 	 return;
 
 	case 7 : printf("Store access fault : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
-	 	 	 CSRW(mepc, mepc + (*(char *)mepc & (0b11 == 0b11 ? 4 : 2)) ); // skip
+	 	 	 CSRW(mepc, mepc + (((*(char *)mepc) & 0b11) == 0b11 ? 4 : 2)); // skip faulty instruction
 	 	 	 return;
 
 	case 8 : printf("Environment call from U-mode : 0x%08x 0x%08x 0x%08x \n", (unsigned)mcause, (unsigned)mepc, (unsigned)mtval);
